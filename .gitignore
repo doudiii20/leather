@@ -68,12 +68,11 @@ CMakeLists.txt.user*
 # Python byte code
 *.pyc
 
-# Binaries / archives
+# Binaries
 # --------
 *.dll
 *.exe
 *.rar
-*.zip
 
 # Directories with generated files
 .moc/

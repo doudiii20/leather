@@ -17,6 +17,7 @@ else: unix:!android: target.path = /opt/$${TARGET}/bin
 
 SOURCES += main.cpp \
            mainwindow.cpp \
+           produit.cpp \
            client.cpp \
            commercestore.cpp \
            recommendationservice.cpp \
@@ -26,6 +27,7 @@ SOURCES += main.cpp \
            supplierchartwidgets.cpp
 
 HEADERS += mainwindow.h \
+           produit.h \
            client.h \
            commercestore.h \
            recommendationservice.h \

@@ -38,6 +38,10 @@ struct TrackingEvent
 class CommerceStore
 {
 public:
+    /// Colonne libelle sur PRODUITS : "NOM" (schema app) ou "NOM_PRODUIT" (anciennes bases).
+    static QString produitsLibelleColumnPhysical();
+    static bool produitsColumnExists(const QString &columnName);
+
     static bool ensureSchema(QString *errorMessage = nullptr);
 
     static bool loadActiveProductsWithStock(QList<ProductRow> &out, QString *errorMessage = nullptr);

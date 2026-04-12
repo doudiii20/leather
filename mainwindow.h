@@ -70,6 +70,13 @@ private:
     QPushButton *m_demoOrderButton = nullptr;
     QList<RecommendationItem> m_lastRecommendations;
 
+    int m_produitSelectedId = -1;
+
+    void setupProduitPage();
+    void refreshProduitsTable();
+    void fillProduitFormFromTableRow(int row);
+    void clearProduitForm();
+
 private slots:
     void on_pushButton_ajouter_clicked();
     void on_pushButton_supprimer_clicked();
@@ -84,6 +91,10 @@ private slots:
     void onExporterClientsClicked();
     void onDemoTopProductOrderClicked();
     void onClientChatSendRequested();
+    void on_produitTable_cellClicked(int row, int column);
+    void on_btnAjouter_6_clicked();
+    void on_btnModifier_4_clicked();
+    void on_btnSupprimer_4_clicked();
 };
 
 #endif // MAINWINDOW_H

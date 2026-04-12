@@ -5,6 +5,7 @@
 #include "recommendationservice.h"
 #include "chatbotservice.h"
 #include "fournisseur.h"
+#include "produit.h"
 #include <QAbstractItemView>
 #include <QLayout>
 #include <QLabel>
@@ -38,6 +39,8 @@
 #include <QTextStream>
 #include <QTextEdit>
 #include <QStringConverter>
+#include <QSqlQueryModel>
+#include <memory>
 
 namespace {
 static bool mwColumnExists(const QString &table, const QString &column)
@@ -135,6 +138,10 @@ MainWindow::MainWindow(QWidget *parent)
 
     loadClients();
     refreshClientRecommendations();
+
+    if (db.isOpen()) {
+        setupProduitPage();
+    }
 }
 
 void MainWindow::setupFournisseurDashboardBlock()
@@ -395,6 +402,8 @@ void MainWindow::connectSidebar()
     connect(ui->btnProduits, &QPushButton::clicked, this, [this]() {
         ui->contentStack->setCurrentIndex(4);
         setActiveButton(ui->btnProduits);
+        if (db.isOpen())
+            refreshProduitsTable();
     });
 }
 
@@ -449,10 +458,6 @@ void MainWindow::setupClientValidators()
 
 void MainWindow::setupClientUiEnhancements()
 {
-    if (ui->pushButton_8) {
-        ui->pushButton_8->hide();
-    }
-
     QWidget *clientToolsRow = new QWidget(ui->employeeFormBox_3);
     QHBoxLayout *hTools = new QHBoxLayout(clientToolsRow);
     hTools->setContentsMargins(0, 6, 0, 0);
@@ -1129,4 +1134,307 @@ void MainWindow::onDemoTopProductOrderClicked()
     loadClients();
     refreshClientRecommendations();
     QMessageBox::information(this, "Commande", "Commande demo creee #" + QString::number(orderId));
+}
+
+// ------------------- Page Produits -------------------
+
+void MainWindow::setupProduitPage()
+{
+    if (!ui->employeeTable_4)
+        return;
+
+    ui->employeeTable_4->setColumnCount(10);
+    ui->employeeTable_4->setHorizontalHeaderLabels({
+        QStringLiteral("ID"),
+        QStringLiteral("Nom produit"),
+        QStringLiteral("Categorie"),
+        QStringLiteral("Type cuir"),
+        QStringLiteral("Qualite"),
+        QStringLiteral("Qt stock"),
+        QStringLiteral("Etat"),
+        QStringLiteral("Date fab."),
+        QStringLiteral("Type design"),
+        QStringLiteral("Style (interne)"),
+    });
+    ui->employeeTable_4->horizontalHeader()->setStretchLastSection(true);
+    ui->employeeTable_4->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    ui->employeeTable_4->setSelectionBehavior(QAbstractItemView::SelectRows);
+    ui->employeeTable_4->setSelectionMode(QAbstractItemView::SingleSelection);
+    ui->employeeTable_4->setEditTriggers(QAbstractItemView::NoEditTriggers);
+
+    if (ui->comboBox_4 && ui->comboBox_4->findText(QStringLiteral("Inactif")) < 0)
+        ui->comboBox_4->addItem(QStringLiteral("Inactif"));
+
+    if (ui->lineEditAdresse_2)
+        ui->lineEditAdresse_2->setValidator(new QIntValidator(0, 999999999, this));
+
+    connect(ui->employeeTable_4, &QTableWidget::cellClicked, this, &MainWindow::on_produitTable_cellClicked);
+    connect(ui->btnAjouter_6, &QPushButton::clicked, this, &MainWindow::on_btnAjouter_6_clicked);
+    connect(ui->btnModifier_4, &QPushButton::clicked, this, &MainWindow::on_btnModifier_4_clicked);
+    connect(ui->btnSupprimer_4, &QPushButton::clicked, this, &MainWindow::on_btnSupprimer_4_clicked);
+
+    if (ui->pushButton_8 && ui->textEdit_3 && ui->lineEditSearch_4) {
+        connect(ui->pushButton_8, &QPushButton::clicked, this, [this]() {
+            const QString q = ui->lineEditSearch_4->text().trimmed();
+            if (q.isEmpty()) {
+                QMessageBox::information(this, QStringLiteral("Produits"),
+                                         QStringLiteral("Saisissez un texte dans le champ au-dessus du bouton Envoyer."));
+                return;
+            }
+            ui->textEdit_3->append(
+                QStringLiteral("[%1] %2\n(Assistant API non integre.)")
+                    .arg(QDateTime::currentDateTime().toString(QStringLiteral("dd/MM HH:mm")), q));
+            ui->lineEditSearch_4->clear();
+        });
+    }
+
+    refreshProduitsTable();
+}
+
+void MainWindow::refreshProduitsTable()
+{
+    if (!ui->employeeTable_4 || !db.isOpen())
+        return;
+
+    std::unique_ptr<QSqlQueryModel> model(Produit::afficher());
+    if (!model)
+        return;
+    if (model->lastError().isValid()) {
+        QMessageBox::warning(this, QStringLiteral("Produits"),
+                             QStringLiteral("Impossible de charger les produits:\n%1").arg(model->lastError().text()));
+        return;
+    }
+
+    ui->employeeTable_4->setSortingEnabled(false);
+    ui->employeeTable_4->setRowCount(0);
+
+    const int n = model->rowCount();
+    for (int r = 0; r < n; ++r) {
+        ui->employeeTable_4->insertRow(r);
+        for (int c = 0; c < 10; ++c) {
+            const QVariant v = model->data(model->index(r, c));
+            QString txt;
+            if (c == 7) {
+                const QDate d = v.toDate();
+                if (d.isValid()) {
+                    txt = d.toString(Qt::ISODate);
+                } else {
+                    const QDateTime dt = v.toDateTime();
+                    if (dt.isValid())
+                        txt = dt.date().toString(Qt::ISODate);
+                }
+            } else {
+                txt = v.toString();
+            }
+            ui->employeeTable_4->setItem(r, c, new QTableWidgetItem(txt));
+        }
+    }
+    ui->employeeTable_4->setSortingEnabled(true);
+}
+
+void MainWindow::clearProduitForm()
+{
+    m_produitSelectedId = -1;
+    if (ui->lineEditCIN_4)
+        ui->lineEditCIN_4->clear();
+    if (ui->lineEditNom_4)
+        ui->lineEditNom_4->clear();
+    if (ui->lineEditPrenom_4)
+        ui->lineEditPrenom_4->clear();
+    if (ui->lineEditAdresse_2)
+        ui->lineEditAdresse_2->clear();
+    if (ui->lineEditPrenom_5)
+        ui->lineEditPrenom_5->clear();
+    if (ui->comboBox_3)
+        ui->comboBox_3->setCurrentIndex(0);
+    if (ui->comboBox_4)
+        ui->comboBox_4->setCurrentIndex(0);
+    if (ui->comboBox_5)
+        ui->comboBox_5->setCurrentIndex(0);
+    if (ui->dateTimeEdit)
+        ui->dateTimeEdit->setDate(QDate::currentDate());
+}
+
+void MainWindow::fillProduitFormFromTableRow(int row)
+{
+    if (row < 0 || !ui->employeeTable_4 || !ui->employeeTable_4->item(row, 0))
+        return;
+
+    auto cell = [this, row](int col) -> QString {
+        QTableWidgetItem *it = ui->employeeTable_4->item(row, col);
+        return it ? it->text() : QString();
+    };
+
+    m_produitSelectedId = cell(0).toInt();
+    if (ui->lineEditCIN_4)
+        ui->lineEditCIN_4->setText(cell(1));
+    if (ui->lineEditNom_4)
+        ui->lineEditNom_4->setText(cell(2));
+    if (ui->lineEditPrenom_4)
+        ui->lineEditPrenom_4->setText(cell(3));
+
+    const QString packedStyle = cell(9);
+    QString pq, ptd, ps;
+    QDate pdf;
+    Produit::unpackPackedStyle(packedStyle, &pq, nullptr, &pdf, &ptd, &ps);
+
+    const QString qualiteAff = cell(4).isEmpty() ? pq : cell(4);
+    if (ui->comboBox_3 && !qualiteAff.isEmpty())
+        ui->comboBox_3->setCurrentText(qualiteAff);
+
+    bool qtyOk = false;
+    const int qty = cell(5).toInt(&qtyOk);
+    if (ui->lineEditAdresse_2)
+        ui->lineEditAdresse_2->setText(qtyOk ? QString::number(qty) : cell(5));
+
+    const QString etatAff = cell(6);
+    if (ui->comboBox_4 && !etatAff.isEmpty()) {
+        const int ix = ui->comboBox_4->findText(etatAff);
+        if (ix >= 0)
+            ui->comboBox_4->setCurrentIndex(ix);
+        else
+            ui->comboBox_4->setCurrentText(etatAff);
+    }
+
+    const QString tdAff = cell(8).isEmpty() ? ptd : cell(8);
+    if (ui->comboBox_5 && !tdAff.isEmpty())
+        ui->comboBox_5->setCurrentText(tdAff);
+
+    QDate dateFab;
+    if (!cell(7).isEmpty()) {
+        dateFab = QDate::fromString(cell(7), Qt::ISODate);
+        if (!dateFab.isValid())
+            dateFab = QDate::fromString(cell(7), QStringLiteral("dd/MM/yyyy"));
+    }
+    if (!dateFab.isValid())
+        dateFab = pdf;
+    if (ui->dateTimeEdit) {
+        if (dateFab.isValid())
+            ui->dateTimeEdit->setDate(dateFab);
+        else
+            ui->dateTimeEdit->setDate(QDate::currentDate());
+    }
+
+    if (ui->lineEditPrenom_5)
+        ui->lineEditPrenom_5->setText(ps.isEmpty() ? packedStyle : ps);
+}
+
+void MainWindow::on_produitTable_cellClicked(int row, int)
+{
+    fillProduitFormFromTableRow(row);
+}
+
+void MainWindow::on_btnAjouter_6_clicked()
+{
+    if (!db.isOpen()) {
+        QMessageBox::warning(this, QStringLiteral("Produits"), QStringLiteral("Base de donnees non connectee."));
+        return;
+    }
+
+    bool qtyOk = false;
+    const int qte = ui->lineEditAdresse_2 ? ui->lineEditAdresse_2->text().trimmed().toInt(&qtyOk) : 0;
+    if (!qtyOk || qte < 0) {
+        QMessageBox::warning(this, QStringLiteral("Produits"), QStringLiteral("Quantite stock invalide (entier >= 0)."));
+        return;
+    }
+
+    const int nid = Produit::nextAvailableId();
+    const QString nom = ui->lineEditCIN_4 ? ui->lineEditCIN_4->text().trimmed() : QString();
+    if (nom.isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("Produits"), QStringLiteral("Nom produit obligatoire."));
+        return;
+    }
+
+    Produit p(nid,
+              nom,
+              ui->lineEditNom_4 ? ui->lineEditNom_4->text().trimmed() : QString(),
+              ui->lineEditPrenom_4 ? ui->lineEditPrenom_4->text().trimmed() : QString(),
+              ui->comboBox_3 ? ui->comboBox_3->currentText() : QString(),
+              qte,
+              ui->comboBox_4 ? ui->comboBox_4->currentText() : QString(),
+              ui->dateTimeEdit ? ui->dateTimeEdit->date() : QDate(),
+              ui->comboBox_5 ? ui->comboBox_5->currentText() : QString(),
+              ui->lineEditPrenom_5 ? ui->lineEditPrenom_5->text().trimmed() : QString());
+
+    if (!p.ajouter()) {
+        QMessageBox::critical(this, QStringLiteral("Produits"),
+                              QStringLiteral("Echec ajout:\n%1").arg(Produit::lastSqlError));
+        return;
+    }
+    refreshProduitsTable();
+    clearProduitForm();
+    QMessageBox::information(this, QStringLiteral("Produits"), QStringLiteral("Produit ajoute (ID %1).").arg(nid));
+}
+
+void MainWindow::on_btnModifier_4_clicked()
+{
+    if (!db.isOpen()) {
+        QMessageBox::warning(this, QStringLiteral("Produits"), QStringLiteral("Base de donnees non connectee."));
+        return;
+    }
+    if (m_produitSelectedId <= 0) {
+        QMessageBox::warning(this, QStringLiteral("Produits"), QStringLiteral("Selectionnez une ligne dans le tableau."));
+        return;
+    }
+
+    bool qtyOk = false;
+    const int qte = ui->lineEditAdresse_2 ? ui->lineEditAdresse_2->text().trimmed().toInt(&qtyOk) : 0;
+    if (!qtyOk || qte < 0) {
+        QMessageBox::warning(this, QStringLiteral("Produits"), QStringLiteral("Quantite stock invalide (entier >= 0)."));
+        return;
+    }
+
+    const QString nom = ui->lineEditCIN_4 ? ui->lineEditCIN_4->text().trimmed() : QString();
+    if (nom.isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("Produits"), QStringLiteral("Nom produit obligatoire."));
+        return;
+    }
+
+    Produit p(m_produitSelectedId,
+              nom,
+              ui->lineEditNom_4 ? ui->lineEditNom_4->text().trimmed() : QString(),
+              ui->lineEditPrenom_4 ? ui->lineEditPrenom_4->text().trimmed() : QString(),
+              ui->comboBox_3 ? ui->comboBox_3->currentText() : QString(),
+              qte,
+              ui->comboBox_4 ? ui->comboBox_4->currentText() : QString(),
+              ui->dateTimeEdit ? ui->dateTimeEdit->date() : QDate(),
+              ui->comboBox_5 ? ui->comboBox_5->currentText() : QString(),
+              ui->lineEditPrenom_5 ? ui->lineEditPrenom_5->text().trimmed() : QString());
+
+    if (!p.modifier(m_produitSelectedId, m_produitSelectedId)) {
+        QMessageBox::critical(this, QStringLiteral("Produits"),
+                              QStringLiteral("Echec modification:\n%1").arg(Produit::lastSqlError));
+        return;
+    }
+    refreshProduitsTable();
+    QMessageBox::information(this, QStringLiteral("Produits"), QStringLiteral("Produit modifie."));
+}
+
+void MainWindow::on_btnSupprimer_4_clicked()
+{
+    if (!db.isOpen()) {
+        QMessageBox::warning(this, QStringLiteral("Produits"), QStringLiteral("Base de donnees non connectee."));
+        return;
+    }
+    if (m_produitSelectedId <= 0) {
+        QMessageBox::warning(this, QStringLiteral("Produits"), QStringLiteral("Selectionnez une ligne dans le tableau."));
+        return;
+    }
+
+    const auto r = QMessageBox::question(this,
+                                         QStringLiteral("Produits"),
+                                         QStringLiteral("Supprimer le produit ID %1 ?").arg(m_produitSelectedId),
+                                         QMessageBox::Yes | QMessageBox::No,
+                                         QMessageBox::No);
+    if (r != QMessageBox::Yes)
+        return;
+
+    if (!Produit().supprimer(m_produitSelectedId)) {
+        QMessageBox::critical(this, QStringLiteral("Produits"),
+                              QStringLiteral("Echec suppression:\n%1").arg(Produit::lastSqlError));
+        return;
+    }
+    refreshProduitsTable();
+    clearProduitForm();
+    QMessageBox::information(this, QStringLiteral("Produits"), QStringLiteral("Produit supprime."));
 }

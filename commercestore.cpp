@@ -32,7 +32,22 @@ static bool columnExists(const QString &table, const QString &column)
     }
     return q.value(0).toInt() > 0;
 }
+
 } // namespace
+
+QString CommerceStore::produitsLibelleColumnPhysical()
+{
+    if (columnExists(QStringLiteral("PRODUITS"), QStringLiteral("NOM")))
+        return QStringLiteral("NOM");
+    if (columnExists(QStringLiteral("PRODUITS"), QStringLiteral("NOM_PRODUIT")))
+        return QStringLiteral("NOM_PRODUIT");
+    return QStringLiteral("NOM");
+}
+
+bool CommerceStore::produitsColumnExists(const QString &columnName)
+{
+    return columnExists(QStringLiteral("PRODUITS"), columnName);
+}
 
 bool CommerceStore::ensureSchema(QString *errorMessage)
 {
@@ -141,11 +156,12 @@ void CommerceStore::seedDemoCatalogIfEmpty(QString *errorMessage)
         {6, "SC-006", "Sac bandoulière compact", "Sac", "Vachette", "Urban", 129.00, 22},
     };
 
+    const QString nomCol = CommerceStore::produitsLibelleColumnPhysical();
     for (const Seed &s : seeds) {
         QSqlQuery ins;
-        ins.prepare(
-            "INSERT INTO PRODUITS (ID, SKU, NOM, CATEGORIE, TYPE_CUIR, STYLE, PRIX, ACTIF) "
-            "VALUES (:id, :sku, :nom, :cat, :cuir, :style, :prix, 1)");
+        ins.prepare(QStringLiteral("INSERT INTO PRODUITS (ID, SKU, %1, CATEGORIE, TYPE_CUIR, STYLE, PRIX, ACTIF) "
+                                   "VALUES (:id, :sku, :nom, :cat, :cuir, :style, :prix, 1)")
+                        .arg(nomCol));
         ins.bindValue(":id", s.id);
         ins.bindValue(":sku", QString::fromUtf8(s.sku));
         ins.bindValue(":nom", QString::fromUtf8(s.nom));
@@ -174,15 +190,18 @@ bool CommerceStore::loadActiveProductsWithStock(QList<ProductRow> &out, QString 
 {
     out.clear();
     const bool hasActif = columnExists(QStringLiteral("PRODUITS"), QStringLiteral("ACTIF"));
+    const QString pNom = QStringLiteral("P.%1").arg(CommerceStore::produitsLibelleColumnPhysical());
     const QString sql = hasActif
         ? QStringLiteral(
-              "SELECT P.ID, P.SKU, P.NOM, P.CATEGORIE, P.TYPE_CUIR, P.STYLE, P.PRIX, P.ACTIF, "
+              "SELECT P.ID, P.SKU, %1, P.CATEGORIE, P.TYPE_CUIR, P.STYLE, P.PRIX, P.ACTIF, "
               "NVL(S.QTE_DISPONIBLE,0) FROM PRODUITS P "
               "LEFT JOIN STOCK S ON S.ID_PRODUIT = P.ID WHERE NVL(P.ACTIF,1)=1 ORDER BY P.ID")
+                  .arg(pNom)
         : QStringLiteral(
-              "SELECT P.ID, P.SKU, P.NOM, P.CATEGORIE, P.TYPE_CUIR, P.STYLE, P.PRIX, "
+              "SELECT P.ID, P.SKU, %1, P.CATEGORIE, P.TYPE_CUIR, P.STYLE, P.PRIX, "
               "1 AS ACTIF, NVL(S.QTE_DISPONIBLE,0) FROM PRODUITS P "
-              "LEFT JOIN STOCK S ON S.ID_PRODUIT = P.ID ORDER BY P.ID");
+              "LEFT JOIN STOCK S ON S.ID_PRODUIT = P.ID ORDER BY P.ID")
+                  .arg(pNom);
     QSqlQuery q;
     if (!q.exec(sql)) {
         if (errorMessage)
@@ -293,14 +312,17 @@ bool CommerceStore::loadTrackingForOrder(int orderId, QList<TrackingEvent> &out,
 bool CommerceStore::productById(int productId, ProductRow &out, QString *errorMessage)
 {
     const bool hasActif = columnExists(QStringLiteral("PRODUITS"), QStringLiteral("ACTIF"));
+    const QString pNom = QStringLiteral("P.%1").arg(CommerceStore::produitsLibelleColumnPhysical());
     const QString sql = hasActif
         ? QStringLiteral(
-              "SELECT P.ID, P.SKU, P.NOM, P.CATEGORIE, P.TYPE_CUIR, P.STYLE, P.PRIX, P.ACTIF, NVL(S.QTE_DISPONIBLE,0) "
+              "SELECT P.ID, P.SKU, %1, P.CATEGORIE, P.TYPE_CUIR, P.STYLE, P.PRIX, P.ACTIF, NVL(S.QTE_DISPONIBLE,0) "
               "FROM PRODUITS P LEFT JOIN STOCK S ON S.ID_PRODUIT=P.ID WHERE P.ID=:id")
+                  .arg(pNom)
         : QStringLiteral(
-              "SELECT P.ID, P.SKU, P.NOM, P.CATEGORIE, P.TYPE_CUIR, P.STYLE, P.PRIX, "
+              "SELECT P.ID, P.SKU, %1, P.CATEGORIE, P.TYPE_CUIR, P.STYLE, P.PRIX, "
               "1 AS ACTIF, NVL(S.QTE_DISPONIBLE,0) "
-              "FROM PRODUITS P LEFT JOIN STOCK S ON S.ID_PRODUIT=P.ID WHERE P.ID=:id");
+              "FROM PRODUITS P LEFT JOIN STOCK S ON S.ID_PRODUIT=P.ID WHERE P.ID=:id")
+                  .arg(pNom);
     QSqlQuery q;
     q.prepare(sql);
     q.bindValue(":id", productId);
