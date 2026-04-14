@@ -1,30 +1,20 @@
+
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
-#include <QList>
 #include <QMainWindow>
-#include <QtSql/QSqlDatabase>
-#include <QtSql/QSqlQuery>
-#include <QtSql/QSqlError>
-#include <QDebug>
-#include <QPushButton>
-#include <QMessageBox>
-#include <QNetworkAccessManager>
 #include <QLabel>
-#include "clientdata.h"
-#include "recommendationservice.h"
-#include "fournisseurstats.h"
-#include "supplierchartwidgets.h"
+#include <QSqlQuery>
+#include <QPair>
+#include <QStringList>
+#include <QVector>
+#include "produit.h"
 
+                                                   class ApiClient;
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
 QT_END_NAMESPACE
-
-class FournisseurManager;
-class ChatbotService;
-class QTextEdit;
-class QLineEdit;
 
 class MainWindow : public QMainWindow
 {
@@ -34,56 +24,41 @@ public:
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
 
+private slots:
+    void on_btnAjouter_6_clicked();
+    void on_btnModifier_4_clicked();
+    void on_btnSupprimer_4_clicked();
+    void on_btnRechercher_4_clicked();
+    void on_pushButton_6_clicked();   // voir alerte (stock 0)
+    void on_pushButton_7_clicked();   // recherche vocale (texte dans textEdit_2)
+    void on_pushButton_8_clicked();   // chatbot (lineEdit_19 -> textEdit_3)
+
+    void remplirFormulaire(int row, int col);   // ✅ ajoutée
+
 private:
     Ui::MainWindow *ui;
-    QSqlDatabase db;  // objet pour gérer la connexion Oracle
-    QNetworkAccessManager *m_networkAccessManager = nullptr;
-    FournisseurManager *gestionFournisseur = nullptr;
+    ApiClient *apiClient = nullptr;
+    Produit produit;
+    int selectedProduitId = -1;
+    QLabel *validationLabel = nullptr;
+    QStringList chatHistoryTurns;
+    int maxChatHistoryTurns = 16;
+    QVector<QPair<QString, QString>> questionAnswerHistory;
 
-    // Méthodes internes
-    void connectSidebar();                 // gérer la sidebar
-    void setActiveButton(QPushButton *active);  // bouton actif
-    bool connectToDatabase();              // connexion Oracle
-    void setupClientUiEnhancements();
-    void setupClientValidators();
-    void loadClients();
-    void fillClientFormFromSelectedRow();
-    void clearClientForm();
-    void updateAiInsightsPanel(const ClientData &client);
-    bool validateClientFormInputs(bool isUpdate);
-    void setupFournisseurDashboardBlock();
-    void refreshFournisseurDashboard();
-    void setupClientIntelligencePanel();
-    void refreshClientRecommendations();
-
-    QLabel *m_fournisseurStatsSummary = nullptr;
-    QPushButton *m_fournisseurStatsToggle = nullptr;
-    QWidget *m_fournisseurStatsChartsContainer = nullptr;
-    SupplierBarChartWidget *m_fournisseurBarChart = nullptr;
-    SupplierPieChartWidget *m_fournisseurPieChart = nullptr;
-
-    ChatbotService *m_chatbotService = nullptr;
-    QTextEdit *m_clientRecoDisplay = nullptr;
-    QTextEdit *m_clientChatLog = nullptr;
-    QLineEdit *m_clientChatInput = nullptr;
-    QPushButton *m_clientChatSendBtn = nullptr;
-    QPushButton *m_demoOrderButton = nullptr;
-    QList<RecommendationItem> m_lastRecommendations;
-
-private slots:
-    void on_pushButton_ajouter_clicked();
-    void on_pushButton_supprimer_clicked();
-    void on_pushButton_modifier_clicked();
-    void on_btnRechercher_3_clicked();
-    void on_pushButton_resetFiltres_clicked();
-    void on_clientTable_cellClicked(int row, int column);
-    void onRecalculerSegmentationClicked();
-    void onVerifierCommandeClicked();
-    void onEnregistrerPaiementClicked();
-    void onVoirHistoriqueClicked();
-    void onExporterClientsClicked();
-    void onDemoTopProductOrderClicked();
-    void onClientChatSendRequested();
+    void afficherProduits(const QString &texteFiltre = QString());   // filtre vide = tout afficher
+    void remplirTableProduitsDepuisRequete(QSqlQuery &query);
+    void rechercherProduitParNomOuId(const QString &texteBrut);
+    QPair<bool, QString> transcrireVoixWindows();
+    QString construireReponseLocaleAvancee(const QString &question);
+    QString construireReponseChatbot(const QString &entree);
+    QString construireContexteCataloguePourApi();
+    QString trouverMeilleurMatch(const QString &transcrit);
+    bool envoyerEmailAlerteStockSiConfigure(const QString &corpsTexte, int nombreProduits, QString &outInfo);
+    void viderFormulaire();
+    bool validerFormulaire(int &outId, int &outQte, QString &outErrorMsg, QWidget *&outInvalidWidget);
+    void cacherErreurSaisie();
+    void afficherErreurSaisie(QWidget *champ, const QString &message);
 };
 
-#endif // MAINWINDOW_H
+#endif
+
