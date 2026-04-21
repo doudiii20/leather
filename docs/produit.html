@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Fiche Produit - Royal Leather</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <main class="container product-page">
+    <a class="back-link" href="./index.html">← Retour au catalogue</a>
+
+    <section class="card product-card">
+      <div class="product-media" aria-hidden="true">RL</div>
+      <div class="product-info">
+        <p class="badge">Fiche Article</p>
+        <h1 id="productName">Article</h1>
+        <p id="productRef" class="muted">Reference #</p>
+        <p id="productPrice" class="price">0.00 TND</p>
+        <p class="desc">
+          Produit en cuir premium concu pour un usage quotidien avec une finition artisanale.
+        </p>
+        <button class="btn">Ajouter au panier</button>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    (function () {
+      const params = new URLSearchParams(window.location.search);
+      const id = params.get("id") || "N/A";
+      const nom = params.get("nom") || "Article Royal Leather";
+      const prix = params.get("prix") || "0.00";
+
+      document.title = nom + " - Royal Leather";
+      document.getElementById("productName").textContent = nom;
+      document.getElementById("productRef").textContent = "Reference #" + id;
+      document.getElementById("productPrice").textContent = Number(prix).toFixed(2) + " TND";
+    })();
+  </script>
+</body>
+</html>
