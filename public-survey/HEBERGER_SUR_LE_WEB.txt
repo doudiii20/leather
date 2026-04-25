@@ -1,0 +1,72 @@
+================================================================================
+  PUBLIER LE QUESTIONNAIRE D’AVIS (pour que le lien SMS marche sur iPhone)
+================================================================================
+
+Sans cette étape, le lien peut être un « fichier local » (file://) : Safari
+affiche « cannot open the page because it is a local file ».
+
+--------------------------------------------------------------------------------
+  SI VOUS VOYEZ « Deploy your first project » (page d’accueil / inscription)
+--------------------------------------------------------------------------------
+
+C’est la page après inscription ou première connexion. Ce n’est PAS encore
+la zone « glisser-déposer » un dossier.
+
+  A) Terminez la création du compte (Google, e-mail, etc.) si ce n’est pas fait.
+
+  B) Une fois connecté, ouvrez MANUELLEMENT cette adresse dans Chrome :
+         https://app.netlify.com/drop
+     (page « Drop » = dépôt du dossier du site)
+
+     Si « Drop » ne s’affiche pas ou redirige encore vers l’accueil :
+     - Cliquez en haut sur le logo Netlify ou « Sites » / tableau de bord
+     - Cherchez « Add new site » ou « Ajouter un site »
+     - Choisissez « Deploy manually » ou « Déploiement manuel » / « Deploy without Git »
+     - Une zone pour glisser un dossier ou des fichiers doit apparaître.
+
+--------------------------------------------------------------------------------
+  MÉTHODE RAPIDE : NETLIFY DROP (gratuit, sans ligne de commande)
+--------------------------------------------------------------------------------
+
+1) Compte Netlify créé et vous êtes connecté(e) dans le navigateur.
+
+2) Dans l’explorateur Windows, ouvrez le dossier :
+      leather\public-survey\
+
+3) Double-cliquez sur le fichier :
+      preparer_et_ouvrir_netlify.bat
+   Il copie la dernière version du formulaire depuis Resources\ et ouvre
+   votre dossier + la page https://app.netlify.com/drop (connectez-vous si demandé).
+
+4) Sur la page « Drop » (ou déploiement manuel) : glissez-déposez TOUT LE DOSSIER « public-survey »
+   (ou au minimum les 2 fichiers : index.html + satisfaction_avis_client.html)
+   dans la zone indiquée.
+
+5) Netlify affiche une adresse du type :
+      https://nom-aleatoire-123.netlify.app
+
+6) Dans l’application Leather, pour les SMS « Avis », utilisez ce modèle
+   d’URL (remplacez par VOTRE lien Netlify) :
+
+   https://nom-aleatoire-123.netlify.app/satisfaction_avis_client.html?clientId={id}&prenom={prenom}&nom={nom}&email={email}
+
+   Ou seulement la racine (redirige vers le formulaire) :
+
+   https://nom-aleatoire-123.netlify.app/?clientId={id}&prenom={prenom}&nom={nom}&email={email}
+
+   Enregistrez-la dans :
+   - le fichier leather_survey_url.txt (une ligne) à côté de l’exe, OU
+   - la variable d’environnement LEATHER_SURVEY_URL_TEMPLATE, OU
+   - la fenêtre collée quand l’app demande l’URL du questionnaire.
+
+--------------------------------------------------------------------------------
+  REMARQUES
+--------------------------------------------------------------------------------
+
+- Le fichier satisfaction_avis_client.html charge jsPDF depuis Internet
+  (cdnjs). Le téléphone du client doit avoir les données / Wi‑Fi pour le PDF.
+
+- Après modification du HTML dans Resources\, relancez preparer_et_ouvrir_netlify.bat
+  puis redéployez sur Netlify si vous changez le formulaire.
+
+================================================================================

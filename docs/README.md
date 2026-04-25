@@ -15,8 +15,20 @@ Sur GitHub : **Settings** → **Pages** → **Build and deployment** :
 - **Branch** : `main` / **`/docs`**
 - Enregistrer, attendre 1 à 2 minutes.
 
+## Images catalogue
+
+Les fichiers du dossier `images/catalogue/` reprennent les memes photos que `Resources/images/catalogue/` (pour affichage sur la fiche web apres scan QR).
+
+L'application Qt ajoute le parametre `img` dans l'URL du QR, par exemple :
+
+`images/catalogue/sac/1773322456.jpg`
+
 ## Tester
 
 Ouvrir dans le navigateur :
 
 `https://doudiii20.github.io/leather/produit.html?id=1&nom=Test&prix=99`
+
+Avec image (exemple) :
+
+`https://doudiii20.github.io/leather/produit.html?id=1&nom=Test&prix=99&img=images/catalogue/sac/1773322456.jpg`

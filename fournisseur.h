@@ -10,6 +10,7 @@ class MainWindow;
 }
 
 class QSpinBox;
+class QPushButton;
 
 class FournisseurManager : public QObject
 {
@@ -17,6 +18,10 @@ class FournisseurManager : public QObject
 
 public:
     explicit FournisseurManager(Ui::MainWindow *ui, QObject *parent = nullptr);
+    bool enregistrerCoordonneesGeo(const QString &codePartenaire,
+                                   double latitude,
+                                   double longitude,
+                                   QString *errorMessage = nullptr) const;
 
 signals:
     void fournisseursChanged();
@@ -35,6 +40,7 @@ private:
     void setupTable();
     void setupFormControls();
     void setupConnections();
+    void exportFournisseursTable();
     void clearForm();
     void loadRowToForm(int row);
     void refreshTable(const QString &keyword = QString());
@@ -48,9 +54,15 @@ private:
     bool supprimerDb(const QString &code, QString *errorMessage = nullptr) const;
     bool chargerDb(QList<FournisseurData> &rows, const QString &keyword, QString *errorMessage = nullptr) const;
     bool codeExistsDb(const QString &code, const QString &excludeCode = QString(), QString *errorMessage = nullptr) const;
+    void enterEditMode(const QString &code);
+    void exitEditMode(bool restoreSnapshot);
 
     Ui::MainWindow *m_ui = nullptr;
     QSpinBox *m_spinCommandes = nullptr;
+    bool m_editMode = false;
+    QString m_editCode;
+    FournisseurData m_editSnapshot;
+    QPushButton *m_cancelEditButton = nullptr;
 };
 
 #endif // FOURNISSEUR_H

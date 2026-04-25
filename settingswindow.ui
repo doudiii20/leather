@@ -1,0 +1,1186 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>SettingsWindow</class>
+ <widget class="QDialog" name="SettingsWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>860</width>
+    <height>640</height>
+   </rect>
+  </property>
+  <property name="minimumSize">
+   <size>
+    <width>760</width>
+    <height>520</height>
+   </size>
+  </property>
+  <property name="windowTitle">
+   <string>Paramètres</string>
+  </property>
+  <property name="modal">
+   <bool>true</bool>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayoutRoot">
+   <property name="spacing">
+    <number>14</number>
+   </property>
+   <property name="leftMargin">
+    <number>18</number>
+   </property>
+   <property name="topMargin">
+    <number>16</number>
+   </property>
+   <property name="rightMargin">
+    <number>18</number>
+   </property>
+   <property name="bottomMargin">
+    <number>14</number>
+   </property>
+   <item>
+    <widget class="QLabel" name="labelTitle">
+     <property name="text">
+      <string>Paramètres de l'application</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLabel" name="labelSubtitle">
+     <property name="text">
+      <string>Utilisez les onglets ci-dessous : chaque thème regroupe des sections distinctes.</string>
+     </property>
+     <property name="wordWrap">
+      <bool>true</bool>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QTabWidget" name="tabWidget">
+     <property name="currentIndex">
+      <number>2</number>
+     </property>
+     <property name="usesScrollButtons">
+      <bool>true</bool>
+     </property>
+     <property name="documentMode">
+      <bool>true</bool>
+     </property>
+     <widget class="QWidget" name="tabAppearance">
+      <attribute name="title">
+       <string>Apparence</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="verticalLayoutAppearanceOuter">
+       <property name="spacing">
+        <number>0</number>
+       </property>
+       <property name="leftMargin">
+        <number>0</number>
+       </property>
+       <property name="topMargin">
+        <number>0</number>
+       </property>
+       <property name="rightMargin">
+        <number>0</number>
+       </property>
+       <property name="bottomMargin">
+        <number>0</number>
+       </property>
+       <item>
+        <widget class="QScrollArea" name="scrollAppearance">
+         <property name="frameShape">
+          <enum>QFrame::Shape::NoFrame</enum>
+         </property>
+         <property name="horizontalScrollBarPolicy">
+          <enum>Qt::ScrollBarPolicy::ScrollBarAlwaysOff</enum>
+         </property>
+         <property name="widgetResizable">
+          <bool>true</bool>
+         </property>
+         <widget class="QWidget" name="scrollContentsAppearance">
+          <property name="geometry">
+           <rect>
+            <x>0</x>
+            <y>0</y>
+            <width>824</width>
+            <height>471</height>
+           </rect>
+          </property>
+          <layout class="QVBoxLayout" name="verticalLayoutAppearance">
+           <property name="spacing">
+            <number>14</number>
+           </property>
+           <property name="leftMargin">
+            <number>8</number>
+           </property>
+           <property name="topMargin">
+            <number>8</number>
+           </property>
+           <property name="rightMargin">
+            <number>12</number>
+           </property>
+           <property name="bottomMargin">
+            <number>12</number>
+           </property>
+           <item>
+            <widget class="QGroupBox" name="groupAppearanceTheme">
+             <property name="title">
+              <string>Thème</string>
+             </property>
+             <layout class="QHBoxLayout" name="horizontalLayoutTheme">
+              <item>
+               <widget class="QRadioButton" name="radioThemeLight">
+                <property name="text">
+                 <string>Mode clair</string>
+                </property>
+                <property name="checked">
+                 <bool>true</bool>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QRadioButton" name="radioThemeDark">
+                <property name="text">
+                 <string>Mode sombre</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <spacer name="horizontalSpacerTheme">
+                <property name="orientation">
+                 <enum>Qt::Orientation::Horizontal</enum>
+                </property>
+                <property name="sizeHint" stdset="0">
+                 <size>
+                  <width>40</width>
+                  <height>20</height>
+                 </size>
+                </property>
+               </spacer>
+              </item>
+             </layout>
+            </widget>
+           </item>
+           <item>
+            <widget class="QGroupBox" name="groupAppearanceAccent">
+             <property name="title">
+              <string>Couleur principale (accent)</string>
+             </property>
+             <layout class="QFormLayout" name="formLayoutAccent">
+              <item row="0" column="0">
+               <widget class="QLabel" name="labelAccent">
+                <property name="text">
+                 <string>Palette</string>
+                </property>
+               </widget>
+              </item>
+              <item row="0" column="1">
+               <widget class="QComboBox" name="comboAccentColor"/>
+              </item>
+             </layout>
+            </widget>
+           </item>
+           <item>
+            <widget class="QGroupBox" name="groupAppearanceFont">
+             <property name="title">
+              <string>Taille du texte</string>
+             </property>
+             <layout class="QFormLayout" name="formLayoutFont">
+              <item row="0" column="0">
+               <widget class="QLabel" name="labelFontSize">
+                <property name="text">
+                 <string>Taille de police (pt)</string>
+                </property>
+               </widget>
+              </item>
+              <item row="0" column="1">
+               <widget class="QSpinBox" name="spinFontSize">
+                <property name="minimum">
+                 <number>8</number>
+                </property>
+                <property name="maximum">
+                 <number>20</number>
+                </property>
+                <property name="value">
+                 <number>11</number>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </widget>
+           </item>
+           <item>
+            <spacer name="verticalSpacerAppearance">
+             <property name="orientation">
+              <enum>Qt::Orientation::Vertical</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>20</width>
+               <height>24</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+          </layout>
+         </widget>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="tabNotifications">
+      <attribute name="title">
+       <string>Notifications</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="verticalLayoutNotificationsOuter">
+       <property name="spacing">
+        <number>0</number>
+       </property>
+       <property name="leftMargin">
+        <number>0</number>
+       </property>
+       <property name="topMargin">
+        <number>0</number>
+       </property>
+       <property name="rightMargin">
+        <number>0</number>
+       </property>
+       <property name="bottomMargin">
+        <number>0</number>
+       </property>
+       <item>
+        <widget class="QScrollArea" name="scrollNotifications">
+         <property name="frameShape">
+          <enum>QFrame::Shape::NoFrame</enum>
+         </property>
+         <property name="horizontalScrollBarPolicy">
+          <enum>Qt::ScrollBarPolicy::ScrollBarAlwaysOff</enum>
+         </property>
+         <property name="widgetResizable">
+          <bool>true</bool>
+         </property>
+         <widget class="QWidget" name="scrollContentsNotifications">
+          <property name="geometry">
+           <rect>
+            <x>0</x>
+            <y>0</y>
+            <width>824</width>
+            <height>471</height>
+           </rect>
+          </property>
+          <layout class="QVBoxLayout" name="verticalLayoutNotifications">
+           <property name="spacing">
+            <number>14</number>
+           </property>
+           <property name="leftMargin">
+            <number>8</number>
+           </property>
+           <property name="topMargin">
+            <number>8</number>
+           </property>
+           <property name="rightMargin">
+            <number>12</number>
+           </property>
+           <property name="bottomMargin">
+            <number>12</number>
+           </property>
+           <item>
+            <widget class="QGroupBox" name="groupNotificationsGeneral">
+             <property name="title">
+              <string>Activation</string>
+             </property>
+             <layout class="QVBoxLayout" name="verticalLayoutNotifGeneral">
+              <item>
+               <widget class="QCheckBox" name="checkNotificationsEnabled">
+                <property name="text">
+                 <string>Activer les notifications dans l'application</string>
+                </property>
+                <property name="checked">
+                 <bool>true</bool>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </widget>
+           </item>
+           <item>
+            <widget class="QGroupBox" name="groupNotificationsTypes">
+             <property name="title">
+              <string>Types d'alertes</string>
+             </property>
+             <layout class="QVBoxLayout" name="verticalLayoutNotifTypes">
+              <item>
+               <widget class="QCheckBox" name="checkNotifyStockLow">
+                <property name="text">
+                 <string>Stock faible (matières / produits)</string>
+                </property>
+                <property name="checked">
+                 <bool>true</bool>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QCheckBox" name="checkNotifyOrders">
+                <property name="text">
+                 <string>Commandes et expéditions</string>
+                </property>
+                <property name="checked">
+                 <bool>true</bool>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QCheckBox" name="checkNotifyClients">
+                <property name="text">
+                 <string>Événements clients (retards, crédit, etc.)</string>
+                </property>
+                <property name="checked">
+                 <bool>true</bool>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </widget>
+           </item>
+           <item>
+            <spacer name="verticalSpacerNotif">
+             <property name="orientation">
+              <enum>Qt::Orientation::Vertical</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>20</width>
+               <height>24</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+          </layout>
+         </widget>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="tabLanguage">
+      <attribute name="title">
+       <string>Langue</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="verticalLayoutLanguageOuter">
+       <property name="spacing">
+        <number>0</number>
+       </property>
+       <property name="leftMargin">
+        <number>0</number>
+       </property>
+       <property name="topMargin">
+        <number>0</number>
+       </property>
+       <property name="rightMargin">
+        <number>0</number>
+       </property>
+       <property name="bottomMargin">
+        <number>0</number>
+       </property>
+       <item>
+        <widget class="QScrollArea" name="scrollLanguage">
+         <property name="frameShape">
+          <enum>QFrame::Shape::NoFrame</enum>
+         </property>
+         <property name="horizontalScrollBarPolicy">
+          <enum>Qt::ScrollBarPolicy::ScrollBarAlwaysOff</enum>
+         </property>
+         <property name="widgetResizable">
+          <bool>true</bool>
+         </property>
+         <widget class="QWidget" name="scrollContentsLanguage">
+          <property name="geometry">
+           <rect>
+            <x>0</x>
+            <y>0</y>
+            <width>824</width>
+            <height>471</height>
+           </rect>
+          </property>
+          <layout class="QVBoxLayout" name="verticalLayoutLanguage">
+           <property name="spacing">
+            <number>14</number>
+           </property>
+           <property name="leftMargin">
+            <number>8</number>
+           </property>
+           <property name="topMargin">
+            <number>8</number>
+           </property>
+           <property name="rightMargin">
+            <number>12</number>
+           </property>
+           <property name="bottomMargin">
+            <number>12</number>
+           </property>
+           <item>
+            <widget class="QGroupBox" name="groupLanguage">
+             <property name="title">
+              <string>Langue d'interface</string>
+             </property>
+             <layout class="QFormLayout" name="formLayoutLanguage">
+              <item row="0" column="0">
+               <widget class="QLabel" name="labelLanguage">
+                <property name="text">
+                 <string>Langue</string>
+                </property>
+               </widget>
+              </item>
+              <item row="0" column="1">
+               <widget class="QComboBox" name="comboLanguage"/>
+              </item>
+             </layout>
+            </widget>
+           </item>
+           <item>
+            <spacer name="verticalSpacerLang">
+             <property name="orientation">
+              <enum>Qt::Orientation::Vertical</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>20</width>
+               <height>24</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+          </layout>
+         </widget>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="tabSecurity">
+      <attribute name="title">
+       <string>Sécurité</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="verticalLayoutSecurityOuter">
+       <property name="spacing">
+        <number>8</number>
+       </property>
+       <property name="leftMargin">
+        <number>0</number>
+       </property>
+       <property name="topMargin">
+        <number>4</number>
+       </property>
+       <property name="rightMargin">
+        <number>0</number>
+       </property>
+       <property name="bottomMargin">
+        <number>0</number>
+       </property>
+       <item>
+        <widget class="QTabWidget" name="securitySubTabs">
+         <property name="documentMode">
+          <bool>true</bool>
+         </property>
+         <widget class="QWidget" name="subTabSecurityFace">
+          <attribute name="title">
+           <string>Reconnaissance faciale</string>
+          </attribute>
+          <layout class="QVBoxLayout" name="verticalLayoutSubFace">
+           <property name="spacing">
+            <number>12</number>
+           </property>
+           <property name="leftMargin">
+            <number>8</number>
+           </property>
+           <property name="topMargin">
+            <number>8</number>
+           </property>
+           <property name="rightMargin">
+            <number>8</number>
+           </property>
+           <property name="bottomMargin">
+            <number>8</number>
+           </property>
+           <item>
+            <widget class="QGroupBox" name="groupSecurityFace">
+             <property name="title">
+              <string>Connexion biométrique</string>
+             </property>
+             <layout class="QVBoxLayout" name="verticalLayoutFace">
+              <item>
+               <widget class="QCheckBox" name="checkFaceRecognition">
+                <property name="text">
+                 <string>Proposer la connexion par reconnaissance faciale sur l'écran de connexion</string>
+                </property>
+                <property name="checked">
+                 <bool>true</bool>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </widget>
+           </item>
+           <item>
+            <spacer name="verticalSpacerSubFace">
+             <property name="orientation">
+              <enum>Qt::Orientation::Vertical</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>20</width>
+               <height>24</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+          </layout>
+         </widget>
+         <widget class="QWidget" name="subTabSecurityPassword">
+          <attribute name="title">
+           <string>Mot de passe</string>
+          </attribute>
+          <layout class="QVBoxLayout" name="verticalLayoutSubPwd">
+           <property name="spacing">
+            <number>12</number>
+           </property>
+           <property name="leftMargin">
+            <number>8</number>
+           </property>
+           <property name="topMargin">
+            <number>8</number>
+           </property>
+           <property name="rightMargin">
+            <number>8</number>
+           </property>
+           <property name="bottomMargin">
+            <number>8</number>
+           </property>
+           <item>
+            <widget class="QGroupBox" name="groupSecurityPassword">
+             <property name="title">
+              <string>Compte Oracle (APP_USERS)</string>
+             </property>
+             <layout class="QFormLayout" name="formLayoutPassword">
+              <item row="0" column="0">
+               <widget class="QLabel" name="labelPwdCurrent">
+                <property name="text">
+                 <string>Mot de passe actuel</string>
+                </property>
+               </widget>
+              </item>
+              <item row="0" column="1">
+               <widget class="QLineEdit" name="editPasswordCurrent">
+                <property name="echoMode">
+                 <enum>QLineEdit::EchoMode::Password</enum>
+                </property>
+               </widget>
+              </item>
+              <item row="1" column="0">
+               <widget class="QLabel" name="labelPwdNew">
+                <property name="text">
+                 <string>Nouveau mot de passe</string>
+                </property>
+               </widget>
+              </item>
+              <item row="1" column="1">
+               <widget class="QLineEdit" name="editPasswordNew">
+                <property name="echoMode">
+                 <enum>QLineEdit::EchoMode::Password</enum>
+                </property>
+               </widget>
+              </item>
+              <item row="2" column="0">
+               <widget class="QLabel" name="labelPwdConfirm">
+                <property name="text">
+                 <string>Confirmer</string>
+                </property>
+               </widget>
+              </item>
+              <item row="2" column="1">
+               <widget class="QLineEdit" name="editPasswordConfirm">
+                <property name="echoMode">
+                 <enum>QLineEdit::EchoMode::Password</enum>
+                </property>
+               </widget>
+              </item>
+              <item row="3" column="1">
+               <widget class="QPushButton" name="btnApplyPassword">
+                <property name="text">
+                 <string>Enregistrer le nouveau mot de passe</string>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </widget>
+           </item>
+           <item>
+            <spacer name="verticalSpacerSubPwd">
+             <property name="orientation">
+              <enum>Qt::Orientation::Vertical</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>20</width>
+               <height>24</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+          </layout>
+         </widget>
+         <widget class="QWidget" name="subTabSecuritySession">
+          <attribute name="title">
+           <string>Session</string>
+          </attribute>
+          <layout class="QVBoxLayout" name="verticalLayoutSubSession">
+           <property name="spacing">
+            <number>12</number>
+           </property>
+           <property name="leftMargin">
+            <number>8</number>
+           </property>
+           <property name="topMargin">
+            <number>8</number>
+           </property>
+           <property name="rightMargin">
+            <number>8</number>
+           </property>
+           <property name="bottomMargin">
+            <number>8</number>
+           </property>
+           <item>
+            <widget class="QGroupBox" name="groupSecuritySession">
+             <property name="title">
+              <string>Déconnexion automatique</string>
+             </property>
+             <layout class="QFormLayout" name="formLayoutSession">
+              <item row="0" column="0">
+               <widget class="QLabel" name="labelSessionTimeout">
+                <property name="text">
+                 <string>Délai d'inactivité (minutes)</string>
+                </property>
+               </widget>
+              </item>
+              <item row="0" column="1">
+               <widget class="QSpinBox" name="spinSessionTimeout">
+                <property name="suffix">
+                 <string> min</string>
+                </property>
+                <property name="minimum">
+                 <number>5</number>
+                </property>
+                <property name="maximum">
+                 <number>480</number>
+                </property>
+                <property name="value">
+                 <number>30</number>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </widget>
+           </item>
+           <item>
+            <spacer name="verticalSpacerSubSession">
+             <property name="orientation">
+              <enum>Qt::Orientation::Vertical</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>20</width>
+               <height>24</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+          </layout>
+         </widget>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="tabData">
+      <attribute name="title">
+       <string>Données</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="verticalLayoutDataOuter">
+       <property name="spacing">
+        <number>0</number>
+       </property>
+       <property name="leftMargin">
+        <number>0</number>
+       </property>
+       <property name="topMargin">
+        <number>0</number>
+       </property>
+       <property name="rightMargin">
+        <number>0</number>
+       </property>
+       <property name="bottomMargin">
+        <number>0</number>
+       </property>
+       <item>
+        <widget class="QScrollArea" name="scrollData">
+         <property name="frameShape">
+          <enum>QFrame::Shape::NoFrame</enum>
+         </property>
+         <property name="horizontalScrollBarPolicy">
+          <enum>Qt::ScrollBarPolicy::ScrollBarAlwaysOff</enum>
+         </property>
+         <property name="widgetResizable">
+          <bool>true</bool>
+         </property>
+         <widget class="QWidget" name="scrollContentsData">
+          <property name="geometry">
+           <rect>
+            <x>0</x>
+            <y>0</y>
+            <width>824</width>
+            <height>471</height>
+           </rect>
+          </property>
+          <layout class="QVBoxLayout" name="verticalLayoutData">
+           <property name="spacing">
+            <number>14</number>
+           </property>
+           <property name="leftMargin">
+            <number>8</number>
+           </property>
+           <property name="topMargin">
+            <number>8</number>
+           </property>
+           <property name="rightMargin">
+            <number>12</number>
+           </property>
+           <property name="bottomMargin">
+            <number>12</number>
+           </property>
+           <item>
+            <widget class="QGroupBox" name="groupDataAutosave">
+             <property name="title">
+              <string>Sauvegarde automatique</string>
+             </property>
+             <layout class="QVBoxLayout" name="verticalLayoutAutosave">
+              <item>
+               <widget class="QCheckBox" name="checkAutoSave">
+                <property name="text">
+                 <string>Activer la sauvegarde automatique des formulaires (préférence locale)</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <layout class="QHBoxLayout" name="horizontalLayoutAutosave">
+                <item>
+                 <widget class="QLabel" name="labelAutosaveInterval">
+                  <property name="text">
+                   <string>Intervalle</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QSpinBox" name="spinAutoSaveInterval">
+                  <property name="suffix">
+                   <string> min</string>
+                  </property>
+                  <property name="minimum">
+                   <number>1</number>
+                  </property>
+                  <property name="maximum">
+                   <number>60</number>
+                  </property>
+                  <property name="value">
+                   <number>5</number>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <spacer name="horizontalSpacerAutosave">
+                  <property name="orientation">
+                   <enum>Qt::Orientation::Horizontal</enum>
+                  </property>
+                  <property name="sizeHint" stdset="0">
+                   <size>
+                    <width>40</width>
+                    <height>20</height>
+                   </size>
+                  </property>
+                 </spacer>
+                </item>
+               </layout>
+              </item>
+             </layout>
+            </widget>
+           </item>
+           <item>
+            <spacer name="verticalSpacerData">
+             <property name="orientation">
+              <enum>Qt::Orientation::Vertical</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>20</width>
+               <height>24</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+          </layout>
+         </widget>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="tabBusiness">
+      <attribute name="title">
+       <string>Préférences métier</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="verticalLayoutBusinessOuter">
+       <property name="spacing">
+        <number>0</number>
+       </property>
+       <property name="leftMargin">
+        <number>0</number>
+       </property>
+       <property name="topMargin">
+        <number>0</number>
+       </property>
+       <property name="rightMargin">
+        <number>0</number>
+       </property>
+       <property name="bottomMargin">
+        <number>0</number>
+       </property>
+       <item>
+        <widget class="QScrollArea" name="scrollBusiness">
+         <property name="frameShape">
+          <enum>QFrame::Shape::NoFrame</enum>
+         </property>
+         <property name="horizontalScrollBarPolicy">
+          <enum>Qt::ScrollBarPolicy::ScrollBarAlwaysOff</enum>
+         </property>
+         <property name="widgetResizable">
+          <bool>true</bool>
+         </property>
+         <widget class="QWidget" name="scrollContentsBusiness">
+          <property name="geometry">
+           <rect>
+            <x>0</x>
+            <y>0</y>
+            <width>824</width>
+            <height>471</height>
+           </rect>
+          </property>
+          <layout class="QVBoxLayout" name="verticalLayoutBusiness">
+           <property name="spacing">
+            <number>14</number>
+           </property>
+           <property name="leftMargin">
+            <number>8</number>
+           </property>
+           <property name="topMargin">
+            <number>8</number>
+           </property>
+           <property name="rightMargin">
+            <number>12</number>
+           </property>
+           <property name="bottomMargin">
+            <number>12</number>
+           </property>
+           <item>
+            <widget class="QGroupBox" name="groupBusinessDisplay">
+             <property name="title">
+              <string>Affichage (montants et dates)</string>
+             </property>
+             <layout class="QFormLayout" name="formLayoutBusinessDisplay">
+              <item row="0" column="0">
+               <widget class="QLabel" name="labelCurrency">
+                <property name="text">
+                 <string>Devise</string>
+                </property>
+               </widget>
+              </item>
+              <item row="0" column="1">
+               <widget class="QComboBox" name="comboCurrency"/>
+              </item>
+              <item row="1" column="0">
+               <widget class="QLabel" name="labelDateFormat">
+                <property name="text">
+                 <string>Format de date</string>
+                </property>
+               </widget>
+              </item>
+              <item row="1" column="1">
+               <widget class="QComboBox" name="comboDateFormat"/>
+              </item>
+             </layout>
+            </widget>
+           </item>
+           <item>
+            <widget class="QGroupBox" name="groupBusinessStock">
+             <property name="title">
+              <string>Stocks</string>
+             </property>
+             <layout class="QFormLayout" name="formLayoutBusinessStock">
+              <item row="0" column="0">
+               <widget class="QLabel" name="labelStockMin">
+                <property name="text">
+                 <string>Seuil minimum (alerte)</string>
+                </property>
+               </widget>
+              </item>
+              <item row="0" column="1">
+               <widget class="QSpinBox" name="spinStockMinimum">
+                <property name="maximum">
+                 <number>1000000</number>
+                </property>
+                <property name="value">
+                 <number>5</number>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </widget>
+           </item>
+           <item>
+            <spacer name="verticalSpacerBusiness">
+             <property name="orientation">
+              <enum>Qt::Orientation::Vertical</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>20</width>
+               <height>24</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+          </layout>
+         </widget>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="tabProfile">
+      <attribute name="title">
+       <string>Profil utilisateur</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="verticalLayoutProfileOuter">
+       <property name="spacing">
+        <number>0</number>
+       </property>
+       <property name="leftMargin">
+        <number>0</number>
+       </property>
+       <property name="topMargin">
+        <number>0</number>
+       </property>
+       <property name="rightMargin">
+        <number>0</number>
+       </property>
+       <property name="bottomMargin">
+        <number>0</number>
+       </property>
+       <item>
+        <widget class="QScrollArea" name="scrollProfile">
+         <property name="frameShape">
+          <enum>QFrame::Shape::NoFrame</enum>
+         </property>
+         <property name="horizontalScrollBarPolicy">
+          <enum>Qt::ScrollBarPolicy::ScrollBarAlwaysOff</enum>
+         </property>
+         <property name="widgetResizable">
+          <bool>true</bool>
+         </property>
+         <widget class="QWidget" name="scrollContentsProfile">
+          <property name="geometry">
+           <rect>
+            <x>0</x>
+            <y>0</y>
+            <width>824</width>
+            <height>471</height>
+           </rect>
+          </property>
+          <layout class="QVBoxLayout" name="verticalLayoutProfile">
+           <property name="spacing">
+            <number>14</number>
+           </property>
+           <property name="leftMargin">
+            <number>8</number>
+           </property>
+           <property name="topMargin">
+            <number>8</number>
+           </property>
+           <property name="rightMargin">
+            <number>12</number>
+           </property>
+           <property name="bottomMargin">
+            <number>12</number>
+           </property>
+           <item>
+            <widget class="QGroupBox" name="groupProfileIdentity">
+             <property name="title">
+              <string>Identité</string>
+             </property>
+             <layout class="QFormLayout" name="formLayoutProfileIdentity">
+              <item row="0" column="0">
+               <widget class="QLabel" name="labelProfileName">
+                <property name="text">
+                 <string>Nom affiché</string>
+                </property>
+               </widget>
+              </item>
+              <item row="0" column="1">
+               <widget class="QLineEdit" name="editProfileDisplayName"/>
+              </item>
+              <item row="1" column="0">
+               <widget class="QLabel" name="labelProfileEmail">
+                <property name="text">
+                 <string>Email</string>
+                </property>
+               </widget>
+              </item>
+              <item row="1" column="1">
+               <widget class="QLineEdit" name="editProfileEmail"/>
+              </item>
+             </layout>
+            </widget>
+           </item>
+           <item>
+            <widget class="QGroupBox" name="groupProfilePhoto">
+             <property name="title">
+              <string>Photo de profil</string>
+             </property>
+             <layout class="QVBoxLayout" name="verticalLayoutProfilePhoto">
+              <item>
+               <layout class="QHBoxLayout" name="horizontalLayoutProfilePhoto">
+                <item>
+                 <widget class="QLabel" name="labelProfilePhotoPreview">
+                  <property name="minimumSize">
+                   <size>
+                    <width>72</width>
+                    <height>72</height>
+                   </size>
+                  </property>
+                  <property name="maximumSize">
+                   <size>
+                    <width>96</width>
+                    <height>96</height>
+                   </size>
+                  </property>
+                  <property name="frameShape">
+                   <enum>QFrame::Shape::StyledPanel</enum>
+                  </property>
+                  <property name="scaledContents">
+                   <bool>true</bool>
+                  </property>
+                  <property name="alignment">
+                   <set>Qt::AlignmentFlag::AlignCenter</set>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QPushButton" name="btnProfileChoosePhoto">
+                  <property name="text">
+                   <string>Choisir une image…</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <spacer name="horizontalSpacerProfile">
+                  <property name="orientation">
+                   <enum>Qt::Orientation::Horizontal</enum>
+                  </property>
+                  <property name="sizeHint" stdset="0">
+                   <size>
+                    <width>40</width>
+                    <height>20</height>
+                   </size>
+                  </property>
+                 </spacer>
+                </item>
+               </layout>
+              </item>
+             </layout>
+            </widget>
+           </item>
+           <item>
+            <widget class="QGroupBox" name="groupProfileActions">
+             <property name="title">
+              <string>Enregistrement</string>
+             </property>
+             <layout class="QHBoxLayout" name="horizontalLayoutProfileActions">
+              <item>
+               <widget class="QPushButton" name="btnProfileSave">
+                <property name="text">
+                 <string>Enregistrer le profil</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <spacer name="horizontalSpacerProfileActions">
+                <property name="orientation">
+                 <enum>Qt::Orientation::Horizontal</enum>
+                </property>
+                <property name="sizeHint" stdset="0">
+                 <size>
+                  <width>40</width>
+                  <height>20</height>
+                 </size>
+                </property>
+               </spacer>
+              </item>
+             </layout>
+            </widget>
+           </item>
+           <item>
+            <spacer name="verticalSpacerProfile">
+             <property name="orientation">
+              <enum>Qt::Orientation::Vertical</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>20</width>
+               <height>24</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+          </layout>
+         </widget>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+    </widget>
+   </item>
+   <item>
+    <widget class="QDialogButtonBox" name="buttonBox">
+     <property name="orientation">
+      <enum>Qt::Orientation::Horizontal</enum>
+     </property>
+     <property name="standardButtons">
+      <set>QDialogButtonBox::StandardButton::Close</set>
+     </property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections>
+  <connection>
+   <sender>buttonBox</sender>
+   <signal>rejected()</signal>
+   <receiver>SettingsWindow</receiver>
+   <slot>reject()</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>400</x>
+     <y>600</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>400</x>
+     <y>300</y>
+    </hint>
+   </hints>
+  </connection>
+ </connections>
+</ui>

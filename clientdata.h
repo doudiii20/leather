@@ -1,6 +1,8 @@
 #ifndef CLIENTDATA_H
 #define CLIENTDATA_H
 
+#include <cmath>
+#include <limits>
 #include <QString>
 
 struct ClientData
@@ -23,6 +25,13 @@ struct ClientData
     double soldeCreditUtilise = 0.0;
     int scoreClient = 0;
     int scoreRisque = 100;
+    double latitude = std::numeric_limits<double>::quiet_NaN();
+    double longitude = std::numeric_limits<double>::quiet_NaN();
+
+    bool hasValidGeo() const
+    {
+        return std::isfinite(latitude) && std::isfinite(longitude);
+    }
 };
 
 #endif // CLIENTDATA_H

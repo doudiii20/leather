@@ -13,19 +13,16 @@ class ChatbotService : public QObject
 public:
     explicit ChatbotService(QNetworkAccessManager *networkManager, QObject *parent = nullptr);
 
-    /// Appelle l'API si OPENAI_API_KEY est definie, sinon reponse locale.
-    void ask(const QString &userMessage, const QString &systemContext);
+    /// Appelle Ollama en local (llama3) avec le contexte metier.
+    void ask(const QString &userMessage, const QString &systemContext, bool forceLocal = false);
 
 signals:
     void replyReady(const QString &assistantText);
 
 private slots:
-    void onOpenAiFinished();
+    void onReplyFinished();
 
 private:
-    QString localFallback(const QString &userMessage, const QString &context) const;
-    void finishWithLocal(const QString &userMessage, const QString &context);
-
     QNetworkAccessManager *m_nam = nullptr;
     QNetworkReply *m_openAiReply = nullptr;
     QString m_pendingUserMessage;

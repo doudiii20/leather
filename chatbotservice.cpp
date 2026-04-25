@@ -1,4 +1,5 @@
 #include "chatbotservice.h"
+#include "chatbotreplyformat.h"
 
 #include <QNetworkAccessManager>
 #include <QNetworkRequest>
@@ -7,6 +8,8 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QUrl>
+#include <QTimer>
+#include <QDebug>
 #include <QtGlobal>
 
 ChatbotService::ChatbotService(QNetworkAccessManager *networkManager, QObject *parent)
@@ -15,48 +18,9 @@ ChatbotService::ChatbotService(QNetworkAccessManager *networkManager, QObject *p
 {
 }
 
-QString ChatbotService::localFallback(const QString &userMessage, const QString &context) const
+void ChatbotService::ask(const QString &userMessage, const QString &systemContext, bool forceLocal)
 {
-    const QString u = userMessage.toLower();
-
-    if (u.contains("bonjour") || u.contains("salut") || u.contains("hello"))
-        return "Bonjour ! Je suis l'assistant Royal Leather House. Posez-moi une question sur nos produits en cuir, les prix, le stock ou le suivi de commande.";
-
-    if (u.contains("prix") || u.contains("cout") || u.contains("€") || u.contains("eur")) {
-        return "Les prix du catalogue sont dans le contexte ci-dessous (nom | categorie | prix | stock). "
-               "Indiquez le produit qui vous interesse pour plus de precision.";
-    }
-
-    if (u.contains("stock") || u.contains("disponib") || u.contains("rupture")) {
-        return "La disponibilite est indiquee pour chaque article dans le contexte (colonne stock). "
-               "Si un produit est en faible quantite, nous pouvons vous proposer une alternative assortie.";
-    }
-
-    if (u.contains("commande") || u.contains("suivi") || u.contains("livraison") || u.contains("expedition")) {
-        return "Le suivi de vos commandes recentes figure dans le contexte. "
-               "Pour une commande precise, indiquez son numero (#ID) ou la date.";
-    }
-
-    if (u.contains("portefeuille") || u.contains("ceinture") || u.contains("sac")) {
-        return "Nous proposons des portefeuilles, ceintures et sacs en cuir. Les suggestions personnalisees "
-               "apparaissent dans le panneau « Produits recommandes » selon votre profil.";
-    }
-
-    if (u.contains("merci"))
-        return "Avec plaisir. Autre question sur nos articles ou votre commande ?";
-
-    return "Je peux vous aider sur le catalogue (prix/stock), le suivi de commande et les assortiments cuir.\n\n"
-           "Contexte actuel:\n"
-        + context;
-}
-
-void ChatbotService::finishWithLocal(const QString &userMessage, const QString &context)
-{
-    emit replyReady(localFallback(userMessage, context));
-}
-
-void ChatbotService::ask(const QString &userMessage, const QString &systemContext)
-{
+    Q_UNUSED(forceLocal)
     m_pendingUserMessage = userMessage;
     m_pendingContext = systemContext;
 
@@ -66,14 +30,15 @@ void ChatbotService::ask(const QString &userMessage, const QString &systemContex
         m_openAiReply = nullptr;
     }
 
-    const QString apiKey = QString::fromUtf8(qgetenv("OPENAI_API_KEY")).trimmed();
-    if (apiKey.isEmpty() || !m_nam) {
-        finishWithLocal(userMessage, systemContext);
+    if (!m_nam) {
+        emit replyReady(QStringLiteral("Service IA indisponible: gestionnaire reseau non initialise."));
         return;
     }
-
-    const QString model = QString::fromUtf8(qgetenv("OPENAI_MODEL")).trimmed();
-    const QString useModel = model.isEmpty() ? QStringLiteral("gpt-4o-mini") : model;
+    const QString ollamaUrl = QString::fromUtf8(qgetenv("OLLAMA_CHAT_URL")).trimmed().isEmpty()
+                                  ? QStringLiteral("http://localhost:11434/api/chat")
+                                  : QString::fromUtf8(qgetenv("OLLAMA_CHAT_URL")).trimmed();
+    const QString model = QString::fromUtf8(qgetenv("OLLAMA_MODEL")).trimmed();
+    const QString useModel = model.isEmpty() ? QStringLiteral("llama3") : model;
 
     const QString sys =
         "Tu es l'assistant client d'une maroquinerie (Royal Leather House). "
@@ -89,17 +54,28 @@ void ChatbotService::ask(const QString &userMessage, const QString &systemContex
     QJsonObject root;
     root["model"] = useModel;
     root["messages"] = messages;
-    root["temperature"] = 0.4;
+    root["stream"] = false;
 
-    QNetworkRequest req(QUrl("https://api.openai.com/v1/chat/completions"));
+    QNetworkRequest req{QUrl(ollamaUrl)};
     req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-    req.setRawHeader("Authorization", QByteArray("Bearer ") + apiKey.toUtf8());
+#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
+    req.setTransferTimeout(120000); // 120s: les modèles locaux peuvent être lents au premier run.
+#endif
 
     m_openAiReply = m_nam->post(req, QJsonDocument(root).toJson(QJsonDocument::Compact));
-    connect(m_openAiReply, &QNetworkReply::finished, this, &ChatbotService::onOpenAiFinished);
+    auto *timeoutTimer = new QTimer(m_openAiReply);
+    timeoutTimer->setSingleShot(true);
+    connect(timeoutTimer, &QTimer::timeout, m_openAiReply, [reply = m_openAiReply]() {
+        if (!reply || !reply->isRunning())
+            return;
+        reply->setProperty("timed_out", true);
+        reply->abort();
+    });
+    timeoutTimer->start(120000);
+    connect(m_openAiReply, &QNetworkReply::finished, this, &ChatbotService::onReplyFinished);
 }
 
-void ChatbotService::onOpenAiFinished()
+void ChatbotService::onReplyFinished()
 {
     auto *reply = qobject_cast<QNetworkReply *>(sender());
     if (!reply || reply != m_openAiReply) {
@@ -113,31 +89,37 @@ void ChatbotService::onOpenAiFinished()
     reply->deleteLater();
 
     if (reply->error() != QNetworkReply::NoError) {
-        emit replyReady(localFallback(m_pendingUserMessage, m_pendingContext)
-                        + "\n\n(Mode secours: API IA indisponible.)");
+        const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const bool timedOut = reply->property("timed_out").toBool();
+        qDebug() << "[Chatbot][Ollama] error =" << reply->error() << reply->errorString()
+                 << "| http =" << httpStatus << "| timedOut =" << timedOut;
+        qDebug().noquote() << "[Chatbot][Ollama] raw:" << QString::fromUtf8(raw);
+
+        if (timedOut) {
+            emit replyReady(QStringLiteral(
+                "Erreur : délai dépassé (120s). Le modèle local met trop de temps à répondre.\n"
+                "Vérifiez Ollama, ou utilisez un modèle plus léger (ex: llama3.2:3b)."));
+            return;
+        }
+        emit replyReady(QStringLiteral(
+            "Échec Ollama local (%1). Vérifiez que le service tourne sur http://localhost:11434.")
+                            .arg(reply->errorString()));
         return;
     }
 
     QJsonParseError pe;
     const QJsonDocument doc = QJsonDocument::fromJson(raw, &pe);
     if (pe.error != QJsonParseError::NoError || !doc.isObject()) {
-        finishWithLocal(m_pendingUserMessage, m_pendingContext);
+        emit replyReady(QStringLiteral("Echec Ollama local: reponse JSON invalide."));
         return;
     }
 
     const QJsonObject o = doc.object();
-    const QJsonArray choices = o.value("choices").toArray();
-    if (choices.isEmpty()) {
-        finishWithLocal(m_pendingUserMessage, m_pendingContext);
-        return;
-    }
-
-    const QJsonObject msg = choices.at(0).toObject().value("message").toObject();
-    const QString content = msg.value("content").toString().trimmed();
+    const QString content = o.value("message").toObject().value("content").toString().trimmed();
     if (content.isEmpty()) {
-        finishWithLocal(m_pendingUserMessage, m_pendingContext);
+        emit replyReady(QStringLiteral("Echec Ollama local: aucune reponse retournee."));
         return;
     }
 
-    emit replyReady(content);
+    emit replyReady(formatChatbotDialogueLineBreaks(content));
 }

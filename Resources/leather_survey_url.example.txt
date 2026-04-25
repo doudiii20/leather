@@ -1,0 +1,16 @@
+# IMPORTANT (iPhone / Safari) :
+# Ne mettez JAMAIS un chemin du type file:// ou C:\... ou un fichier ouvert depuis votre PC.
+# Le client recevra « Safari cannot open the page because it is a local file ».
+# Il faut une adresse HTTPS sur Internet.
+#
+# Deploiement rapide : dans le projet, dossier leather\public-survey\
+#   - lisez HEBERGER_SUR_LE_WEB.txt
+#   - double-cliquez preparer_et_ouvrir_netlify.bat puis deposez le dossier sur Netlify Drop.
+#
+# Instructions :
+# 1) Copiez ce fichier vers le dossier ou se trouve leather.exe (ou le dossier depuis lequel vous lancez l'app).
+# 2) Renommez la copie en : leather_survey_url.txt
+# 3) Effacez ces lignes commençant par # et mettez UNE SEULE ligne : votre URL HTTPS du formulaire.
+#
+# Exemple (a adapter apres hebergement sur Netlify / GitHub Pages / etc.) :
+# https://votre-site.netlify.app/satisfaction_avis_client.html?clientId={id}&prenom={prenom}&nom={nom}&email={email}

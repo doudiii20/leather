@@ -1,0 +1,52 @@
+# Copiez ce fichier vers "opencv_local.pri" et adaptez les chemins.
+# Qt Creator : Exécuter qmake, Reconstruire.
+#
+# =============================================================================
+# KIT Qt MINGW — OpenCV a compiler vous-meme avec le meme MinGW que Qt
+# =============================================================================
+# L’installateur OpenCV Windows (Bureau) est pour MSVC uniquement : incompatible MinGW.
+#
+# 1) Notez le chemin du compilateur de VOTRE kit Qt MinGW, par exemple :
+#      C:\Qt\Tools\mingw1310_64\bin
+#    (Qt Creator > Projets > Kit : ligne "Compilateur C++" pour voir le chemin.)
+#
+# 2) Téléchargez les sources OpenCV + opencv_contrib (meme version), extrayez-les.
+#
+# 3) Invite de commandes (cmd), ajoutez MinGW au PATH puis CMake :
+#
+#      set PATH=C:\Qt\Tools\mingw1310_64\bin;%PATH%
+#      mkdir C:\opencv-mingw-build && cd C:\opencv-mingw-build
+#
+#      cmake -G "MinGW Makefiles" ^
+#        -DCMAKE_BUILD_TYPE=Release ^
+#        -DCMAKE_INSTALL_PREFIX=C:/opencv-mingw-install ^
+#        -DBUILD_opencv_world=ON ^
+#        -DOPENCV_EXTRA_MODULES_PATH=C:/chemin/opencv_contrib/modules ^
+#        C:/chemin/opencv/sources
+#
+#      mingw32-make -j8
+#      mingw32-make install
+#
+# 4) Renseignez ci-dessous (install = prefix cmake) :
+#
+#      OPENCV_DIR = dossier install (contient include/ et lib/)
+#      OPENCV_MINGW_LIBDIR = meme dossier .../lib (libopencv_worldXXXX.dll.a)
+#
+# 5) OPENCV_WORLD_LIB = nom sans "lib" ni extension (ex. opencv_world4120 selon la version compilee).
+#
+# 6) Copiez les DLL depuis C:\opencv-mingw-install\x64\mingw\bin (ou bin selon layout) a cote de leather.exe pour l’execution.
+#
+# =============================================================================
+# KIT MSVC (autre machine) — build officielle Windows
+# =============================================================================
+# OPENCV_DIR = C:/Users/.../opencv/build
+# Ne pas definir OPENCV_MINGW_LIBDIR ni OPENCV_MINGW_LDFLAGS.
+
+OPENCV_WORLD_LIB = opencv_world4120
+
+# --- MinGW (exemple apres cmake --install) ---
+OPENCV_DIR = C:/opencv-mingw-install
+OPENCV_MINGW_LIBDIR = C:/opencv-mingw-install/lib
+
+# --- Si la ligne -L/-l ne suffit pas, decommentez et adaptez :
+# OPENCV_MINGW_LDFLAGS = -LC:/opencv-mingw-install/lib -lopencv_world4120

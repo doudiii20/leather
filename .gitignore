@@ -81,3 +81,14 @@ CMakeLists.txt.user*
 .rcc/
 .uic/
 /build*/
+
+# Copie locale pour déploiement Netlify (regénérée par public-survey/preparer_et_ouvrir_netlify.bat)
+public-survey/satisfaction_avis_client.html
+
+# Chemin OpenCV machine locale (voir opencv_local.pri.example)
+opencv_local.pri
+
+# Secrets API (charge par main.cpp si present)
+.env
+client_secret.json
+leather_survey_url.txt

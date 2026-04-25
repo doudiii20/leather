@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Avis client — LEATHER HOUSE</title>
+  <style>
+    :root {
+      --brown: rgb(88, 41, 0);
+      --cream: rgb(248, 241, 227);
+      --paper: rgb(252, 248, 240);
+      --border: rgb(200, 150, 100);
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "Segoe UI", system-ui, sans-serif;
+      margin: 0;
+      min-height: 100vh;
+      background: linear-gradient(160deg, rgb(243, 233, 215), rgb(252, 248, 240));
+      color: var(--brown);
+      padding: 24px 16px 48px;
+    }
+    .card {
+      max-width: 520px;
+      margin: 0 auto;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 28px 24px 24px;
+      box-shadow: 0 8px 28px rgba(88, 41, 0, 0.08);
+    }
+    h1 {
+      font-size: 1.35rem;
+      margin: 0 0 6px;
+      letter-spacing: 0.02em;
+    }
+    .subtitle { font-size: 0.9rem; opacity: 0.85; margin-bottom: 22px; }
+    label {
+      display: block;
+      font-weight: 600;
+      font-size: 0.88rem;
+      margin: 14px 0 6px;
+    }
+    input[type="text"], input[type="email"], input[type="number"], textarea, select {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 0.95rem;
+      background: var(--paper);
+      color: var(--brown);
+    }
+    textarea { min-height: 88px; max-height: 200px; resize: vertical; }
+    .row2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    @media (max-width: 480px) { .row2 { grid-template-columns: 1fr; } }
+    fieldset {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin: 18px 0 0;
+      padding: 12px 14px 16px;
+    }
+    legend { font-weight: 700; font-size: 0.9rem; padding: 0 6px; }
+    .stars label { display: inline-flex; align-items: center; margin: 6px 10px 6px 0; font-weight: 500; }
+    .actions {
+      position: sticky;
+      bottom: 0;
+      margin: 20px -24px -8px;
+      padding: 16px 24px 18px;
+      background: linear-gradient(to top, #fff 65%, rgba(255, 255, 255, 0));
+      border-top: 1px solid rgba(200, 150, 100, 0.45);
+    }
+    button[type="submit"] {
+      width: 100%;
+      padding: 14px 16px;
+      background: var(--brown);
+      color: var(--cream);
+      border: none;
+      border-radius: 6px;
+      font-size: 1rem;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 4px 14px rgba(88, 41, 0, 0.2);
+    }
+    button[type="submit"]:hover { filter: brightness(1.08); }
+    .ok { display: none; margin-top: 18px; padding: 14px; background: #e8f5e9; border-radius: 8px; font-size: 0.92rem; }
+    .brand { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.12em; opacity: 0.7; margin-bottom: 4px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="brand">LEATHER HOUSE</div>
+    <h1>Votre avis nous intéresse</h1>
+    <p class="subtitle">Quelques questions après votre achat (environ 1 minute).</p>
+
+    <form id="f" novalidate>
+      <input type="hidden" id="clientId" name="clientId" />
+
+      <div class="row2">
+        <div>
+          <label for="prenom">Prénom</label>
+          <input type="text" id="prenom" name="prenom" autocomplete="given-name" />
+        </div>
+        <div>
+          <label for="nom">Nom</label>
+          <input type="text" id="nom" name="nom" autocomplete="family-name" />
+        </div>
+      </div>
+      <label for="email">E-mail (optionnel)</label>
+      <input type="email" id="email" name="email" autocomplete="email" />
+
+      <fieldset>
+        <legend>Global</legend>
+        <label for="note">Note globale (1 à 5)</label>
+        <select id="note" name="note" required>
+          <option value="">— Choisir —</option>
+          <option value="5">5 — Excellent</option>
+          <option value="4">4 — Très bien</option>
+          <option value="3">3 — Bien</option>
+          <option value="2">2 — À améliorer</option>
+          <option value="1">1 — Insatisfait</option>
+        </select>
+      </fieldset>
+
+      <fieldset>
+        <legend>Détails</legend>
+        <label for="produit">Produit ou commande concerné (optionnel)</label>
+        <input type="text" id="produit" name="produit" placeholder="ex. ceinture, sac, n° commande…" />
+
+        <label for="commentaire">Commentaire libre</label>
+        <textarea id="commentaire" name="commentaire" placeholder="Qualité du cuir, délais, accueil…"></textarea>
+
+        <label for="reco">Recommanderiez-vous LEATHER HOUSE ?</label>
+        <select id="reco" name="reco">
+          <option value="">—</option>
+          <option value="oui">Oui</option>
+          <option value="peut-etre">Peut-être</option>
+          <option value="non">Non</option>
+        </select>
+      </fieldset>
+
+      <p style="margin:18px 0 0;font-size:0.85rem;opacity:0.75;">Faites défiler jusqu’en bas si besoin — le bouton d’envoi reste visible en bas de l’écran.</p>
+
+      <div class="actions">
+        <button type="submit">Télécharger le PDF et ouvrir la messagerie</button>
+      </div>
+    </form>
+
+    <div id="ok" class="ok"></div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" crossorigin="anonymous"></script>
+  <script>
+    (function () {
+      var p = new URLSearchParams(window.location.search);
+      ["clientId", "prenom", "nom", "email"].forEach(function (key) {
+        var el = document.getElementById(key);
+        var v = p.get(key);
+        if (el && v) {
+          try { el.value = decodeURIComponent(v.replace(/\+/g, " ")); }
+          catch (e) { el.value = v; }
+        }
+      });
+    })();
+
+    // Destinataire boutique: fourni par l'application via le parametre URL `shopEmail`.
+    var EMAIL_BOUTIQUE = "";
+    var SHOP_EMAIL_PARAM = (new URLSearchParams(window.location.search).get("shopEmail") || "").trim();
+
+    function emailBoutiqueEffectif() {
+      if (SHOP_EMAIL_PARAM && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(SHOP_EMAIL_PARAM)) {
+        return SHOP_EMAIL_PARAM;
+      }
+      alert("Destinataire boutique manquant (paramètre URL shopEmail). Contactez LEATHER HOUSE.");
+      return "";
+    }
+
+    function buildAvisTextLines(note) {
+      return [
+        "=== Avis client LEATHER HOUSE ===",
+        "Date: " + new Date().toLocaleString("fr-FR"),
+        "",
+        "ID client (si fourni): " + (document.getElementById("clientId").value || "—"),
+        "Prénom: " + document.getElementById("prenom").value,
+        "Nom: " + document.getElementById("nom").value,
+        "E-mail: " + document.getElementById("email").value,
+        "Note globale: " + note + " / 5",
+        "Produit / commande: " + document.getElementById("produit").value,
+        "Recommandation: " + document.getElementById("reco").value,
+        "",
+        "Commentaire:",
+        document.getElementById("commentaire").value
+      ];
+    }
+
+    function downloadAvisPdf(lines, fileBase) {
+      if (!window.jspdf || !window.jspdf.jsPDF) {
+        alert("La librairie PDF n’a pas pu être chargée (connexion Internet ou blocage du CDN). Réessayez ou désactivez le bloqueur de pub pour ce site.");
+        return false;
+      }
+      var jsPDF = window.jspdf.jsPDF;
+      var doc = new jsPDF({ unit: "mm", format: "a4" });
+      var margin = 18;
+      var pageW = doc.internal.pageSize.getWidth();
+      var pageH = doc.internal.pageSize.getHeight();
+      var maxW = pageW - 2 * margin;
+      var y = margin;
+      var lineH = 6.2;
+
+      doc.setTextColor(88, 41, 0);
+      doc.setFontSize(16);
+      doc.text("LEATHER HOUSE", margin, y);
+      y += 10;
+      doc.setFontSize(12);
+      doc.setTextColor(40, 40, 40);
+      doc.text("Formulaire d’avis client", margin, y);
+      y += 12;
+
+      doc.setFontSize(10);
+      var body = lines.join("\n");
+      var wrapped = doc.splitTextToSize(body, maxW);
+      for (var i = 0; i < wrapped.length; i++) {
+        if (y + lineH > pageH - margin) {
+          doc.addPage();
+          y = margin;
+        }
+        doc.text(wrapped[i], margin, y);
+        y += lineH;
+      }
+
+      doc.save(fileBase + ".pdf");
+      return true;
+    }
+
+    document.getElementById("f").addEventListener("submit", function (e) {
+      e.preventDefault();
+      var note = document.getElementById("note").value;
+      if (!note) {
+        alert("Merci de choisir une note globale.");
+        return;
+      }
+      var dest = emailBoutiqueEffectif();
+      if (!dest) return;
+
+      var lines = buildAvisTextLines(note);
+      var stamp =
+        new Date().toISOString().replace(/[-:]/g, "").replace("T", "_").slice(0, 15);
+      var base = "LEATHERHOUSE_avis_" + stamp;
+
+      if (!downloadAvisPdf(lines, base)) return;
+
+      var resume =
+        "Bonjour,\n\n"
+        + "Nous vous remercions sincèrement d’avoir pris le temps de nous noter : votre avis nous aide à progresser et à mieux vous servir.\n\n"
+        + "Un récapitulatif a été enregistré sous le fichier « " + base + ".pdf » sur cet appareil (souvent le dossier Téléchargements). "
+        + "Pour nous le transmettre, merci de joindre ce PDF à votre message (icône trombone), puis d’envoyer.\n\n"
+        + "Bien cordialement,\nL’équipe LEATHER HOUSE\n\n"
+        + "Résumé : note " + note + "/5 — "
+        + document.getElementById("prenom").value + " " + document.getElementById("nom").value;
+
+      var subj = encodeURIComponent("[LEATHER HOUSE] Merci pour votre avis — retour client");
+      var body = encodeURIComponent(resume);
+
+      var ok = document.getElementById("ok");
+      ok.style.display = "block";
+      var mailtoHref = "mailto:" + dest + "?subject=" + subj + "&body=" + body;
+      ok.innerHTML =
+        "Merci pour votre retour.<br><br>"
+        + "Le fichier <strong>" + base + ".pdf</strong> est enregistré sur votre appareil. "
+        + "Pour nous l’envoyer : ouvrez votre messagerie ci-dessous (destinataire <strong>" + dest + "</strong>), joignez le PDF, puis envoyez.<br><br>"
+        + "<a href=\"" + mailtoHref + "\" style=\"color:#1565c0;font-weight:700;\">Ouvrir la messagerie</a> "
+        + "(un clic peut être nécessaire selon le navigateur).";
+    });
+  </script>
+</body>
+</html>

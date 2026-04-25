@@ -3,9 +3,9 @@
 #include <QPainter>
 
 namespace {
-static const QColor kBrown(88, 41, 0);
+static const QColor kBrown(93, 46, 6);            // #5d2e06
 static const QColor kBarFill(180, 120, 70);
-static const QColor kBg(252, 248, 240);
+static const QColor kBg(249, 244, 232);         // #f9f4e8 — fond dashboard / graphiques
 
 static QVector<QColor> pieColors()
 {

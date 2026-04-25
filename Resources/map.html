@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Carte fournisseurs — OpenStreetMap</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    html, body, #map { width: 100%; height: 100%; margin: 0; padding: 0; background: #e8eef5; }
+    .supplier-pin { background: transparent !important; border: none !important; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    let map = null;
+    let markersLayer = null;
+
+    function initMap() {
+      map = L.map('map', { zoomControl: true }).setView([36.8065, 10.1815], 12);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+      }).addTo(map);
+      markersLayer = L.layerGroup().addTo(map);
+    }
+
+    function clearMarkers() {
+      if (markersLayer) markersLayer.clearLayers();
+    }
+
+    function makeSupplierIcon() {
+      return L.divIcon({
+        className: 'supplier-pin',
+        html: '<div style="width:26px;height:26px;border-radius:50%;background:#d32f2f;color:#fff;' +
+              'border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.4);display:flex;align-items:center;' +
+              'justify-content:center;font-size:17px;font-weight:800;line-height:1;font-family:Segoe UI,Arial,sans-serif;">+</div>',
+        iconSize: [26, 26],
+        iconAnchor: [13, 13]
+      });
+    }
+
+    function esc(s) {
+      return String(s != null ? s : '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    /**
+     * Donnees injectees depuis Qt : [{ nom, adresse }, ...]
+     * Geocodage via Nominatim (1 requete / ~1,1 s pour respecter la politique d usage).
+     * Note : User-Agent HTTP reel = profil Qt WebEngine ; fetch() ne peut pas forcer User-Agent en Chromium.
+     */
+    function geocodeAndAddMarkersFromRows(rows) {
+      if (!map || !markersLayer) {
+        console.error('[Map] Carte non initialisée');
+        return;
+      }
+      clearMarkers();
+      const icon = makeSupplierIcon();
+      const bounds = [];
+      const list = (rows || []).filter(function (r) { return r && String(r.adresse || '').trim(); });
+      let i = 0;
+
+      function finishIfDone() {
+        if (bounds.length > 0) {
+          map.fitBounds(bounds, { padding: [48, 48], maxZoom: 15 });
+        } else {
+          map.setView([34.0, 9.0], 6);
+        }
+      }
+
+      function next() {
+        if (i >= list.length) {
+          finishIfDone();
+          return;
+        }
+        const row = list[i++];
+        const adresse = String(row.adresse || '').trim();
+        const q = encodeURIComponent(adresse);
+        const nomHtml = esc(row.nom != null ? row.nom : 'Fournisseur');
+        const adrHtml = esc(adresse);
+
+        fetch('https://nominatim.openstreetmap.org/search?format=json&q=' + q, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+            'Accept-Language': 'fr,fr-FR;q=0.9,en;q=0.8',
+            // Demande utilisateur (souvent ignore / interdit par le navigateur pour fetch) :
+            'User-Agent': 'QtApp'
+          }
+        })
+          .then(function (response) { return response.json(); })
+          .then(function (data) {
+            if (data && data.length > 0) {
+              var lat = parseFloat(data[0].lat);
+              var lon = parseFloat(data[0].lon);
+              if (isFinite(lat) && isFinite(lon)) {
+                var m = L.marker([lat, lon], { icon: icon }).addTo(markersLayer);
+                m.bindPopup('<b>' + nomHtml + '</b><br/>' + adrHtml);
+                bounds.push([lat, lon]);
+              }
+            }
+          })
+          .catch(function (e) { console.error('[Map] Nominatim', e); })
+          .finally(function () {
+            setTimeout(next, 1100);
+          });
+      }
+
+      if (list.length === 0) {
+        finishIfDone();
+        return;
+      }
+      next();
+    }
+
+    window.geocodeAndAddMarkersFromRows = geocodeAndAddMarkersFromRows;
+    window.clearMarkers = clearMarkers;
+    initMap();
+  </script>
+</body>
+</html>

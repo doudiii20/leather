@@ -40,6 +40,8 @@ class CommerceStore
 public:
     /// Colonne libelle sur PRODUITS : "NOM" (schema app) ou "NOM_PRODUIT" (anciennes bases).
     static QString produitsLibelleColumnPhysical();
+    static QString produitsCategorieColumnPhysical();
+    static QString produitsTypeCuirColumnPhysical();
     static bool produitsColumnExists(const QString &columnName);
 
     static bool ensureSchema(QString *errorMessage = nullptr);

@@ -1,5 +1,53 @@
 <RCC>
     <qresource prefix="/">
         <file>images/logo.png</file>
+        <file>images/tunisie.png</file>
+        <file>map.html</file>
+        <file>qml/SmartMapView.qml</file>
+        <file>images/catalogue/accessoires/50222325-2d79-47cc-b767-f7ea95be79d5-Grande.webp</file>
+        <file>images/catalogue/accessoires/70473741600000_704732999YL000_90.jpg</file>
+        <file>images/catalogue/accessoires/ccgf.jpg</file>
+        <file>images/catalogue/accessoires/nn-400x457.jpg</file>
+        <file>images/catalogue/accessoires/touch-coffret-cuir-personnalisable-tunisie.jpg</file>
+        <file>images/catalogue/accessoires/trousse-cuir-noir.jpg</file>
+        <file>images/catalogue/accessoires/Trousse-stylos-sac-main-cuir-ofilducuir-lyon-france-819x1024.jpg</file>
+        <file>images/catalogue/ceintures/10425_0414_9029_NM_FA_F1XX.webp</file>
+        <file>images/catalogue/ceintures/a0yz1x-248.jpg</file>
+        <file>images/catalogue/ceintures/ceinture-100-cuir-marron-1100808-1-product_1.jpg</file>
+        <file>images/catalogue/ceintures/ceinture-en-cuir-homme-beltoni-ceinture-bleu-cuir.webp</file>
+        <file>images/catalogue/ceintures/ceinture-reversible-38-mm-en-cuir-noir-et-gris-avec-boucle-pantheon-brossee-plaquee-or_a3f52995-3d9e-4d73-8f8f-9fe59b6963d3.webp</file>
+        <file>images/catalogue/ceintures/dj5uca-25.110.jpg</file>
+        <file>images/catalogue/ceintures/J71A0212.jpg</file>
+        <file>images/catalogue/ceintures/J71A0213.jpg</file>
+        <file>images/catalogue/ceintures/telecharge.jpeg</file>
+        <file>images/catalogue/ceintures/tommy-jeans-ceinture-en-cuir-a-drapeau-allonge-bleu-marine.webp</file>
+        <file>images/catalogue/chaussures/17_b7ae2811-1249-460b-b5b4-1cf3f3a86241.webp</file>
+        <file>images/catalogue/chaussures/2_5bb78782-f887-4f9f-bd43-c48d09f1dbb8.webp</file>
+        <file>images/catalogue/chaussures/ame-souvenir-chaussure-noir-cuir-femme-hkeya.webp</file>
+        <file>images/catalogue/chaussures/chaussure-cuir-pour-homme-tunisie-a-bas-prix-vente-flash-scaled.jpg</file>
+        <file>images/catalogue/chaussures/J71A8029.webp</file>
+        <file>images/catalogue/chaussures/J71A9435-min.webp</file>
+        <file>images/catalogue/chaussures/mary-jane-a-brides-margot.webp</file>
+        <file>images/catalogue/sac/1773322456.jpg</file>
+        <file>images/catalogue/sac/246319_RD_1yf.webp</file>
+        <file>images/catalogue/sac/sac-a-main-femme-alberto-ricci-al2305.webp</file>
+        <file>images/catalogue/sac/sac-a-main-femme-alberto-ricci-gb3681.webp</file>
+        <file>images/catalogue/sac/sac-cabas-cuir-souple-femme-grand-format-et-couleurs-tendance-camel-cuir-veritable-1182174735.webp</file>
+        <file>images/catalogue/sac/WB01940_BX3542_1007_TCO00_M1.jpg</file>
+        <file>images/catalogue/vestes/A16801_0PFAH_9XX_F.webp</file>
+        <file>images/catalogue/vestes/BONBON_050032_0004_356e5b24-9f11-4d12-846e-56862f082f97.webp</file>
+        <file>images/catalogue/vestes/cg23femmelcw8600noir23__028224300_1531_29092022.jpg</file>
+        <file>images/catalogue/vestes/1b921ea9381f2aa6607e3ce5529c49f6.avif</file>
+        <file>images/catalogue/vestes/images.jpeg</file>
+        <file>images/catalogue/vestes/Serge-pariente-style-17-683x1024.jpg</file>
+        <file>images/catalogue/vestes/show_17032440935691703244098.webp</file>
+        <file>images/catalogue/vestes/veste-cuir-femme-veste-moto-cuir-veritable-rouge-ancre-Kbc.webp</file>
+    </qresource>
+    <qresource prefix="/opencv">
+        <file>haarcascade_frontalface_alt.xml</file>
+    </qresource>
+    <qresource prefix="/translations">
+        <file alias="leather_en.qm">../translations/leather_en.qm</file>
+        <file alias="leather_ar.qm">../translations/leather_ar.qm</file>
     </qresource>
 </RCC>

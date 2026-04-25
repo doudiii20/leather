@@ -33,6 +33,77 @@ static bool columnExists(const QString &table, const QString &column)
     return q.value(0).toInt() > 0;
 }
 
+static bool ensureColumn(const QString &table,
+                         const QString &column,
+                         const QString &alterSql,
+                         QString *errorMessage)
+{
+    if (columnExists(table, column))
+        return true;
+    return execSql(alterSql, errorMessage);
+}
+
+/// Colonnes PRODUITS : ordre resultat = ID, SKU, NOM, CATEGORIE, TYPE_CUIR, STYLE, PRIX, ACTIF, QTE (indices ProductRow).
+static QString sqlProduitsSelectCore(const QString &nomPhys,
+                                     const QString &catPhys,
+                                     const QString &cuirPhys,
+                                     bool hasSku,
+                                     bool hasPrix,
+                                     bool hasActif,
+                                     bool hasStyle,
+                                     const QString &whereClause)
+{
+    QString sql = QStringLiteral("SELECT P.ID, ");
+    sql += hasSku ? QStringLiteral("P.SKU, ") : QStringLiteral("CAST(NULL AS VARCHAR2(50)) AS SKU, ");
+    sql += QStringLiteral("P.%1, P.%2 AS CATEGORIE, P.%3 AS TYPE_CUIR, ")
+               .arg(nomPhys, catPhys, cuirPhys);
+    sql += hasStyle ? QStringLiteral("P.STYLE") : QStringLiteral("CAST(NULL AS VARCHAR2(100))");
+    sql += QStringLiteral(", ");
+    sql += hasPrix ? QStringLiteral("P.PRIX") : QStringLiteral("CAST(0 AS NUMBER(12,2))");
+    if (hasActif) {
+        sql += QStringLiteral(
+            ", P.ACTIF, NVL(S.QTE_DISPONIBLE,0) FROM PRODUITS P "
+            "LEFT JOIN STOCK S ON S.ID_PRODUIT = P.ID ");
+    } else {
+        sql += QStringLiteral(
+            ", 1 AS ACTIF, NVL(S.QTE_DISPONIBLE,0) FROM PRODUITS P "
+            "LEFT JOIN STOCK S ON S.ID_PRODUIT = P.ID ");
+    }
+    sql += whereClause;
+    return sql;
+}
+
+static QString sqlProduitsSelectActiveWithStock(const QString &nomPhys,
+                                                const QString &catPhys,
+                                                const QString &cuirPhys,
+                                                bool hasSku,
+                                                bool hasPrix,
+                                                bool hasActif,
+                                                bool hasStyle)
+{
+    const QString where = hasActif ? QStringLiteral("WHERE NVL(P.ACTIF,1)=1 ORDER BY P.ID")
+                                   : QStringLiteral("ORDER BY P.ID");
+    return sqlProduitsSelectCore(nomPhys, catPhys, cuirPhys, hasSku, hasPrix, hasActif, hasStyle, where);
+}
+
+static QString sqlProduitById(const QString &nomPhys,
+                              const QString &catPhys,
+                              const QString &cuirPhys,
+                              bool hasSku,
+                              bool hasPrix,
+                              bool hasActif,
+                              bool hasStyle)
+{
+    return sqlProduitsSelectCore(nomPhys,
+                                 catPhys,
+                                 cuirPhys,
+                                 hasSku,
+                                 hasPrix,
+                                 hasActif,
+                                 hasStyle,
+                                 QStringLiteral("WHERE P.ID=:id"));
+}
+
 } // namespace
 
 QString CommerceStore::produitsLibelleColumnPhysical()
@@ -47,6 +118,26 @@ QString CommerceStore::produitsLibelleColumnPhysical()
 bool CommerceStore::produitsColumnExists(const QString &columnName)
 {
     return columnExists(QStringLiteral("PRODUITS"), columnName);
+}
+
+QString CommerceStore::produitsCategorieColumnPhysical()
+{
+    if (columnExists(QStringLiteral("PRODUITS"), QStringLiteral("CATEGORIE")))
+        return QStringLiteral("CATEGORIE");
+    if (columnExists(QStringLiteral("PRODUITS"), QStringLiteral("CATEGORIE_PRODUIT")))
+        return QStringLiteral("CATEGORIE_PRODUIT");
+    return QStringLiteral("CATEGORIE");
+}
+
+QString CommerceStore::produitsTypeCuirColumnPhysical()
+{
+    if (columnExists(QStringLiteral("PRODUITS"), QStringLiteral("TYPE_CUIR")))
+        return QStringLiteral("TYPE_CUIR");
+    if (columnExists(QStringLiteral("PRODUITS"), QStringLiteral("TYPE_CUIRE")))
+        return QStringLiteral("TYPE_CUIRE");
+    if (columnExists(QStringLiteral("PRODUITS"), QStringLiteral("TYPECUIR")))
+        return QStringLiteral("TYPECUIR");
+    return QStringLiteral("TYPE_CUIR");
 }
 
 bool CommerceStore::ensureSchema(QString *errorMessage)
@@ -114,13 +205,114 @@ bool CommerceStore::ensureSchema(QString *errorMessage)
         return false;
     }
 
-    if (columnExists(QStringLiteral("PRODUITS"), QStringLiteral("ID"))
-        && !columnExists(QStringLiteral("PRODUITS"), QStringLiteral("ACTIF"))) {
-        if (!execSql(QStringLiteral("ALTER TABLE PRODUITS ADD (ACTIF NUMBER(1) DEFAULT 1 NOT NULL)"),
-                       errorMessage)) {
-            return false;
-        }
-    }
+    // Migration schema: ajoute toutes les colonnes manquantes pour installations existantes.
+    // PRODUITS
+    if (!ensureColumn(QStringLiteral("PRODUITS"), QStringLiteral("SKU"),
+                      QStringLiteral("ALTER TABLE PRODUITS ADD (SKU VARCHAR2(50) DEFAULT 'N/A' NOT NULL)"),
+                      errorMessage))
+        return false;
+    if (!ensureColumn(QStringLiteral("PRODUITS"), QStringLiteral("NOM"),
+                      QStringLiteral("ALTER TABLE PRODUITS ADD (NOM VARCHAR2(200) DEFAULT 'Produit' NOT NULL)"),
+                      errorMessage))
+        return false;
+    if (!ensureColumn(QStringLiteral("PRODUITS"), QStringLiteral("CATEGORIE"),
+                      QStringLiteral("ALTER TABLE PRODUITS ADD (CATEGORIE VARCHAR2(50) DEFAULT 'N/A' NOT NULL)"),
+                      errorMessage))
+        return false;
+    if (!ensureColumn(QStringLiteral("PRODUITS"), QStringLiteral("TYPE_CUIR"),
+                      QStringLiteral("ALTER TABLE PRODUITS ADD (TYPE_CUIR VARCHAR2(50))"),
+                      errorMessage))
+        return false;
+    if (!ensureColumn(QStringLiteral("PRODUITS"), QStringLiteral("STYLE"),
+                      QStringLiteral("ALTER TABLE PRODUITS ADD (STYLE VARCHAR2(100))"),
+                      errorMessage))
+        return false;
+    if (!ensureColumn(QStringLiteral("PRODUITS"), QStringLiteral("PRIX"),
+                      QStringLiteral("ALTER TABLE PRODUITS ADD (PRIX NUMBER(12,2) DEFAULT 0 NOT NULL)"),
+                      errorMessage))
+        return false;
+    if (!ensureColumn(QStringLiteral("PRODUITS"), QStringLiteral("ACTIF"),
+                      QStringLiteral("ALTER TABLE PRODUITS ADD (ACTIF NUMBER(1) DEFAULT 1 NOT NULL)"),
+                      errorMessage))
+        return false;
+    if (!ensureColumn(QStringLiteral("PRODUITS"), QStringLiteral("QR_CODE"),
+                      QStringLiteral("ALTER TABLE PRODUITS ADD (QR_CODE VARCHAR2(400))"),
+                      errorMessage))
+        return false;
+
+    // STOCK
+    if (!ensureColumn(QStringLiteral("STOCK"), QStringLiteral("QTE_DISPONIBLE"),
+                      QStringLiteral("ALTER TABLE STOCK ADD (QTE_DISPONIBLE NUMBER DEFAULT 0 NOT NULL)"),
+                      errorMessage))
+        return false;
+    if (!ensureColumn(QStringLiteral("STOCK"), QStringLiteral("QTE_RESERVEE"),
+                      QStringLiteral("ALTER TABLE STOCK ADD (QTE_RESERVEE NUMBER DEFAULT 0 NOT NULL)"),
+                      errorMessage))
+        return false;
+    if (!ensureColumn(QStringLiteral("STOCK"), QStringLiteral("SEUIL_ALERTE"),
+                      QStringLiteral("ALTER TABLE STOCK ADD (SEUIL_ALERTE NUMBER DEFAULT 5 NOT NULL)"),
+                      errorMessage))
+        return false;
+
+    // COMMANDES
+    if (!ensureColumn(QStringLiteral("COMMANDES"), QStringLiteral("STATUT"),
+                      QStringLiteral("ALTER TABLE COMMANDES ADD (STATUT VARCHAR2(40) DEFAULT 'en_attente' NOT NULL)"),
+                      errorMessage))
+        return false;
+    if (!ensureColumn(QStringLiteral("COMMANDES"), QStringLiteral("DATE_COMMANDE"),
+                      QStringLiteral("ALTER TABLE COMMANDES ADD (DATE_COMMANDE DATE DEFAULT SYSDATE NOT NULL)"),
+                      errorMessage))
+        return false;
+    if (!ensureColumn(QStringLiteral("COMMANDES"), QStringLiteral("TOTAL_TTC"),
+                      QStringLiteral("ALTER TABLE COMMANDES ADD (TOTAL_TTC NUMBER(12,2) DEFAULT 0 NOT NULL)"),
+                      errorMessage))
+        return false;
+    if (!ensureColumn(QStringLiteral("COMMANDES"), QStringLiteral("CANAL"),
+                      QStringLiteral("ALTER TABLE COMMANDES ADD (CANAL VARCHAR2(50))"),
+                      errorMessage))
+        return false;
+
+    // LIGNES_COMMANDE
+    if (!ensureColumn(QStringLiteral("LIGNES_COMMANDE"), QStringLiteral("QUANTITE"),
+                      QStringLiteral("ALTER TABLE LIGNES_COMMANDE ADD (QUANTITE NUMBER DEFAULT 1 NOT NULL)"),
+                      errorMessage))
+        return false;
+    if (!ensureColumn(QStringLiteral("LIGNES_COMMANDE"), QStringLiteral("PRIX_UNITAIRE"),
+                      QStringLiteral("ALTER TABLE LIGNES_COMMANDE ADD (PRIX_UNITAIRE NUMBER(12,2) DEFAULT 0 NOT NULL)"),
+                      errorMessage))
+        return false;
+    if (!ensureColumn(QStringLiteral("LIGNES_COMMANDE"), QStringLiteral("REMISE_LIGNE"),
+                      QStringLiteral("ALTER TABLE LIGNES_COMMANDE ADD (REMISE_LIGNE NUMBER(5,2) DEFAULT 0)"),
+                      errorMessage))
+        return false;
+
+    // SUIVI_COMMANDE
+    if (!ensureColumn(QStringLiteral("SUIVI_COMMANDE"), QStringLiteral("STATUT"),
+                      QStringLiteral("ALTER TABLE SUIVI_COMMANDE ADD (STATUT VARCHAR2(40) DEFAULT 'en_attente' NOT NULL)"),
+                      errorMessage))
+        return false;
+    if (!ensureColumn(QStringLiteral("SUIVI_COMMANDE"), QStringLiteral("EVENT_TIME"),
+                      QStringLiteral("ALTER TABLE SUIVI_COMMANDE ADD (EVENT_TIME DATE DEFAULT SYSDATE NOT NULL)"),
+                      errorMessage))
+        return false;
+    if (!ensureColumn(QStringLiteral("SUIVI_COMMANDE"), QStringLiteral("COMMENTAIRE"),
+                      QStringLiteral("ALTER TABLE SUIVI_COMMANDE ADD (COMMENTAIRE VARCHAR2(400))"),
+                      errorMessage))
+        return false;
+
+    // INTERACTIONS_PRODUIT
+    if (!ensureColumn(QStringLiteral("INTERACTIONS_PRODUIT"), QStringLiteral("TYPE_INTERACTION"),
+                      QStringLiteral("ALTER TABLE INTERACTIONS_PRODUIT ADD (TYPE_INTERACTION VARCHAR2(30) DEFAULT 'view' NOT NULL)"),
+                      errorMessage))
+        return false;
+    if (!ensureColumn(QStringLiteral("INTERACTIONS_PRODUIT"), QStringLiteral("POIDS"),
+                      QStringLiteral("ALTER TABLE INTERACTIONS_PRODUIT ADD (POIDS NUMBER DEFAULT 1 NOT NULL)"),
+                      errorMessage))
+        return false;
+    if (!ensureColumn(QStringLiteral("INTERACTIONS_PRODUIT"), QStringLiteral("EVENT_TIME"),
+                      QStringLiteral("ALTER TABLE INTERACTIONS_PRODUIT ADD (EVENT_TIME DATE DEFAULT SYSDATE NOT NULL)"),
+                      errorMessage))
+        return false;
 
     return true;
 }
@@ -157,18 +349,47 @@ void CommerceStore::seedDemoCatalogIfEmpty(QString *errorMessage)
     };
 
     const QString nomCol = CommerceStore::produitsLibelleColumnPhysical();
+    const QString catCol = CommerceStore::produitsCategorieColumnPhysical();
+    const QString cuirCol = CommerceStore::produitsTypeCuirColumnPhysical();
+    const bool hasSku = columnExists(QStringLiteral("PRODUITS"), QStringLiteral("SKU"));
+    const bool hasStyle = columnExists(QStringLiteral("PRODUITS"), QStringLiteral("STYLE"));
+    const bool hasPrix = columnExists(QStringLiteral("PRODUITS"), QStringLiteral("PRIX"));
+    const bool hasActif = columnExists(QStringLiteral("PRODUITS"), QStringLiteral("ACTIF"));
     for (const Seed &s : seeds) {
+        QString cols = QStringLiteral("ID");
+        QString vals = QStringLiteral(":id");
+        if (hasSku) {
+            cols += QStringLiteral(", SKU");
+            vals += QStringLiteral(", :sku");
+        }
+        cols += QStringLiteral(", %1, %2, %3").arg(nomCol, catCol, cuirCol);
+        vals += QStringLiteral(", :nom, :cat, :cuir");
+        if (hasStyle) {
+            cols += QStringLiteral(", STYLE");
+            vals += QStringLiteral(", :style");
+        }
+        if (hasPrix) {
+            cols += QStringLiteral(", PRIX");
+            vals += QStringLiteral(", :prix");
+        }
+        if (hasActif) {
+            cols += QStringLiteral(", ACTIF");
+            vals += QStringLiteral(", :actif_seed");
+        }
         QSqlQuery ins;
-        ins.prepare(QStringLiteral("INSERT INTO PRODUITS (ID, SKU, %1, CATEGORIE, TYPE_CUIR, STYLE, PRIX, ACTIF) "
-                                   "VALUES (:id, :sku, :nom, :cat, :cuir, :style, :prix, 1)")
-                        .arg(nomCol));
+        ins.prepare(QStringLiteral("INSERT INTO PRODUITS (%1) VALUES (%2)").arg(cols, vals));
         ins.bindValue(":id", s.id);
-        ins.bindValue(":sku", QString::fromUtf8(s.sku));
+        if (hasSku)
+            ins.bindValue(":sku", QString::fromUtf8(s.sku));
         ins.bindValue(":nom", QString::fromUtf8(s.nom));
         ins.bindValue(":cat", QString::fromUtf8(s.cat));
         ins.bindValue(":cuir", QString::fromUtf8(s.cuir));
-        ins.bindValue(":style", QString::fromUtf8(s.style));
-        ins.bindValue(":prix", s.prix);
+        if (hasStyle)
+            ins.bindValue(":style", QString::fromUtf8(s.style));
+        if (hasPrix)
+            ins.bindValue(":prix", s.prix);
+        if (hasActif)
+            ins.bindValue(":actif_seed", 1);
         if (!ins.exec()) {
             if (errorMessage)
                 *errorMessage = ins.lastError().text();
@@ -189,19 +410,14 @@ void CommerceStore::seedDemoCatalogIfEmpty(QString *errorMessage)
 bool CommerceStore::loadActiveProductsWithStock(QList<ProductRow> &out, QString *errorMessage)
 {
     out.clear();
-    const bool hasActif = columnExists(QStringLiteral("PRODUITS"), QStringLiteral("ACTIF"));
-    const QString pNom = QStringLiteral("P.%1").arg(CommerceStore::produitsLibelleColumnPhysical());
-    const QString sql = hasActif
-        ? QStringLiteral(
-              "SELECT P.ID, P.SKU, %1, P.CATEGORIE, P.TYPE_CUIR, P.STYLE, P.PRIX, P.ACTIF, "
-              "NVL(S.QTE_DISPONIBLE,0) FROM PRODUITS P "
-              "LEFT JOIN STOCK S ON S.ID_PRODUIT = P.ID WHERE NVL(P.ACTIF,1)=1 ORDER BY P.ID")
-                  .arg(pNom)
-        : QStringLiteral(
-              "SELECT P.ID, P.SKU, %1, P.CATEGORIE, P.TYPE_CUIR, P.STYLE, P.PRIX, "
-              "1 AS ACTIF, NVL(S.QTE_DISPONIBLE,0) FROM PRODUITS P "
-              "LEFT JOIN STOCK S ON S.ID_PRODUIT = P.ID ORDER BY P.ID")
-                  .arg(pNom);
+    const QString nomPhys = CommerceStore::produitsLibelleColumnPhysical();
+    const QString catPhys = CommerceStore::produitsCategorieColumnPhysical();
+    const QString cuirPhys = CommerceStore::produitsTypeCuirColumnPhysical();
+    const bool hasSku = CommerceStore::produitsColumnExists(QStringLiteral("SKU"));
+    const bool hasPrix = CommerceStore::produitsColumnExists(QStringLiteral("PRIX"));
+    const bool hasActif = CommerceStore::produitsColumnExists(QStringLiteral("ACTIF"));
+    const bool hasStyle = CommerceStore::produitsColumnExists(QStringLiteral("STYLE"));
+    const QString sql = sqlProduitsSelectActiveWithStock(nomPhys, catPhys, cuirPhys, hasSku, hasPrix, hasActif, hasStyle);
     QSqlQuery q;
     if (!q.exec(sql)) {
         if (errorMessage)
@@ -228,11 +444,13 @@ bool CommerceStore::loadCategoriesPurchasedByClient(int clientId, QSet<QString> 
 {
     categories.clear();
     QSqlQuery q;
-    q.prepare(
-        "SELECT DISTINCT P.CATEGORIE FROM LIGNES_COMMANDE L "
-        "JOIN COMMANDES C ON C.ID = L.ID_COMMANDE "
-        "JOIN PRODUITS P ON P.ID = L.ID_PRODUIT "
-        "WHERE C.CLIENT_ID = :cid");
+    const QString catCol = CommerceStore::produitsCategorieColumnPhysical();
+    q.prepare(QStringLiteral(
+                  "SELECT DISTINCT P.%1 FROM LIGNES_COMMANDE L "
+                  "JOIN COMMANDES C ON C.ID = L.ID_COMMANDE "
+                  "JOIN PRODUITS P ON P.ID = L.ID_PRODUIT "
+                  "WHERE C.CLIENT_ID = :cid")
+                  .arg(catCol));
     q.bindValue(":cid", clientId);
     if (!q.exec()) {
         if (errorMessage)
@@ -311,18 +529,14 @@ bool CommerceStore::loadTrackingForOrder(int orderId, QList<TrackingEvent> &out,
 
 bool CommerceStore::productById(int productId, ProductRow &out, QString *errorMessage)
 {
-    const bool hasActif = columnExists(QStringLiteral("PRODUITS"), QStringLiteral("ACTIF"));
-    const QString pNom = QStringLiteral("P.%1").arg(CommerceStore::produitsLibelleColumnPhysical());
-    const QString sql = hasActif
-        ? QStringLiteral(
-              "SELECT P.ID, P.SKU, %1, P.CATEGORIE, P.TYPE_CUIR, P.STYLE, P.PRIX, P.ACTIF, NVL(S.QTE_DISPONIBLE,0) "
-              "FROM PRODUITS P LEFT JOIN STOCK S ON S.ID_PRODUIT=P.ID WHERE P.ID=:id")
-                  .arg(pNom)
-        : QStringLiteral(
-              "SELECT P.ID, P.SKU, %1, P.CATEGORIE, P.TYPE_CUIR, P.STYLE, P.PRIX, "
-              "1 AS ACTIF, NVL(S.QTE_DISPONIBLE,0) "
-              "FROM PRODUITS P LEFT JOIN STOCK S ON S.ID_PRODUIT=P.ID WHERE P.ID=:id")
-                  .arg(pNom);
+    const QString nomPhys = CommerceStore::produitsLibelleColumnPhysical();
+    const QString catPhys = CommerceStore::produitsCategorieColumnPhysical();
+    const QString cuirPhys = CommerceStore::produitsTypeCuirColumnPhysical();
+    const bool hasSku = CommerceStore::produitsColumnExists(QStringLiteral("SKU"));
+    const bool hasPrix = CommerceStore::produitsColumnExists(QStringLiteral("PRIX"));
+    const bool hasActif = CommerceStore::produitsColumnExists(QStringLiteral("ACTIF"));
+    const bool hasStyle = CommerceStore::produitsColumnExists(QStringLiteral("STYLE"));
+    const QString sql = sqlProduitById(nomPhys, catPhys, cuirPhys, hasSku, hasPrix, hasActif, hasStyle);
     QSqlQuery q;
     q.prepare(sql);
     q.bindValue(":id", productId);

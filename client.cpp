@@ -1,9 +1,11 @@
 #include "client.h"
 
+#include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QSqlError>
 #include <QVariant>
 #include <QRegularExpression>
+#include <limits>
 
 namespace {
 static bool execSql(const QString &sql, QString *errorMessage)
@@ -95,6 +97,30 @@ static double clamp01(double v)
     if (v > 1.0) return 1.0;
     return v;
 }
+
+static void fillClientFromSelectQuery(const QSqlQuery &query, ClientData &c)
+{
+    c.id = query.value(0).toInt();
+    c.nom = query.value(1).toString();
+    c.prenom = query.value(2).toString();
+    c.email = query.value(3).toString();
+    c.telephone = query.value(4).toString();
+    c.adresse = query.value(5).toString();
+    c.statutClient = query.value(6).toString();
+    c.remiseAccordee = query.value(7).toDouble();
+    c.canalAcquisition = query.value(8).toString();
+    c.modePaiementPrefere = query.value(9).toString();
+    c.totalAchats = query.value(10).toDouble();
+    c.frequenceAchat = query.value(11).toInt();
+    c.retardsPaiement = query.value(12).toInt();
+    c.categorie = query.value(13).toString();
+    c.limiteCredit = query.value(14).toDouble();
+    c.soldeCreditUtilise = query.value(15).toDouble();
+    c.scoreClient = query.value(16).toInt();
+    c.scoreRisque = query.value(17).toInt();
+    c.latitude = query.value(18).isNull() ? std::numeric_limits<double>::quiet_NaN() : query.value(18).toDouble();
+    c.longitude = query.value(19).isNull() ? std::numeric_limits<double>::quiet_NaN() : query.value(19).toDouble();
+}
 }
 
 bool Client::ensureSchema(QString *errorMessage)
@@ -124,7 +150,9 @@ bool Client::ensureSchema(QString *errorMessage)
         {"LIMITE_CREDIT", "ALTER TABLE CLIENT ADD (LIMITE_CREDIT NUMBER(12,2) DEFAULT 0 NOT NULL)"},
         {"SOLDE_CREDIT_UTILISE", "ALTER TABLE CLIENT ADD (SOLDE_CREDIT_UTILISE NUMBER(12,2) DEFAULT 0 NOT NULL)"},
         {"SCORE_CLIENT", "ALTER TABLE CLIENT ADD (SCORE_CLIENT NUMBER DEFAULT 0 NOT NULL)"},
-        {"SCORE_RISQUE", "ALTER TABLE CLIENT ADD (SCORE_RISQUE NUMBER DEFAULT 100 NOT NULL)"}
+        {"SCORE_RISQUE", "ALTER TABLE CLIENT ADD (SCORE_RISQUE NUMBER DEFAULT 100 NOT NULL)"},
+        {"LATITUDE", "ALTER TABLE CLIENT ADD (LATITUDE NUMBER)"},
+        {"LONGITUDE", "ALTER TABLE CLIENT ADD (LONGITUDE NUMBER)"},
     };
 
     for (const Alter &a : alters) {
@@ -151,7 +179,7 @@ bool Client::ensureSchema(QString *errorMessage)
 
 void Client::recalculerScoresEtCategorie(ClientData &client)
 {
-    // IA locale explicable: pondération sur données client + baseline globale réelle (DB)
+    // Scoring explicable : pondération sur données client + baseline globale réelle (DB)
     const AiContext ai = fetchAiContext(client.id);
     const double achatsRef = (ai.avgAchats > 1.0 ? ai.avgAchats : 1.0);
     const double freqRef = (ai.avgFrequence > 1.0 ? ai.avgFrequence : 1.0);
@@ -247,9 +275,9 @@ bool Client::ajouter(ClientData &client, QString *errorMessage)
     query.prepare(
         "INSERT INTO CLIENT (ID, NOM, PRENOM, EMAIL, TELEPHONE, ADRESSE, STATUTCLIENT, REMISEACCORDEE, "
         "CANALACQUISITION, MODEPAIEMENTPREFERE, TOTAL_ACHATS, FREQUENCE_ACHAT, RETARDS_PAIEMENT, "
-        "CATEGORIE, LIMITE_CREDIT, SOLDE_CREDIT_UTILISE, SCORE_CLIENT, SCORE_RISQUE) "
+        "CATEGORIE, LIMITE_CREDIT, SOLDE_CREDIT_UTILISE, SCORE_CLIENT, SCORE_RISQUE, LATITUDE, LONGITUDE) "
         "VALUES (:id, :nom, :prenom, :email, :telephone, :adresse, :statut, :remise, :canal, :mode, "
-        ":total, :freq, :retard, :cat, :limite, :solde, :score, :risque)");
+        ":total, :freq, :retard, :cat, :limite, :solde, :score, :risque, :lat, :lon)");
     query.bindValue(":id", client.id);
     query.bindValue(":nom", client.nom.trimmed());
     query.bindValue(":prenom", client.prenom.trimmed());
@@ -268,6 +296,13 @@ bool Client::ajouter(ClientData &client, QString *errorMessage)
     query.bindValue(":solde", client.soldeCreditUtilise);
     query.bindValue(":score", client.scoreClient);
     query.bindValue(":risque", client.scoreRisque);
+    if (client.hasValidGeo()) {
+        query.bindValue(":lat", client.latitude);
+        query.bindValue(":lon", client.longitude);
+    } else {
+        query.bindValue(":lat", QVariant(QMetaType::fromType<double>()));
+        query.bindValue(":lon", QVariant(QMetaType::fromType<double>()));
+    }
     if (!query.exec()) {
         if (errorMessage) {
             const QString sqlErr = query.lastError().text().trimmed();
@@ -295,7 +330,8 @@ bool Client::modifier(const ClientData &client, QString *errorMessage)
         "UPDATE CLIENT SET NOM=:nom, PRENOM=:prenom, EMAIL=:email, TELEPHONE=:telephone, ADRESSE=:adresse, "
         "STATUTCLIENT=:statut, REMISEACCORDEE=:remise, CANALACQUISITION=:canal, MODEPAIEMENTPREFERE=:mode, "
         "TOTAL_ACHATS=:total, FREQUENCE_ACHAT=:freq, RETARDS_PAIEMENT=:retard, CATEGORIE=:cat, "
-        "LIMITE_CREDIT=:limite, SOLDE_CREDIT_UTILISE=:solde, SCORE_CLIENT=:score, SCORE_RISQUE=:risque "
+        "LIMITE_CREDIT=:limite, SOLDE_CREDIT_UTILISE=:solde, SCORE_CLIENT=:score, SCORE_RISQUE=:risque, "
+        "LATITUDE=:lat, LONGITUDE=:lon "
         "WHERE ID=:id");
     query.bindValue(":id", tmp.id);
     query.bindValue(":nom", tmp.nom.trimmed());
@@ -315,6 +351,13 @@ bool Client::modifier(const ClientData &client, QString *errorMessage)
     query.bindValue(":solde", tmp.soldeCreditUtilise);
     query.bindValue(":score", tmp.scoreClient);
     query.bindValue(":risque", tmp.scoreRisque);
+    if (tmp.hasValidGeo()) {
+        query.bindValue(":lat", tmp.latitude);
+        query.bindValue(":lon", tmp.longitude);
+    } else {
+        query.bindValue(":lat", QVariant(QMetaType::fromType<double>()));
+        query.bindValue(":lon", QVariant(QMetaType::fromType<double>()));
+    }
     if (!query.exec()) {
         if (errorMessage) *errorMessage = query.lastError().text();
         return false;
@@ -348,31 +391,14 @@ bool Client::chargerTous(QList<ClientData> &clients, QString *errorMessage)
     QSqlQuery query;
     if (!query.exec("SELECT ID, NOM, PRENOM, EMAIL, TELEPHONE, ADRESSE, STATUTCLIENT, REMISEACCORDEE, "
                     "CANALACQUISITION, MODEPAIEMENTPREFERE, TOTAL_ACHATS, FREQUENCE_ACHAT, RETARDS_PAIEMENT, "
-                    "CATEGORIE, LIMITE_CREDIT, SOLDE_CREDIT_UTILISE, SCORE_CLIENT, SCORE_RISQUE "
+                    "CATEGORIE, LIMITE_CREDIT, SOLDE_CREDIT_UTILISE, SCORE_CLIENT, SCORE_RISQUE, LATITUDE, LONGITUDE "
                     "FROM CLIENT ORDER BY ID")) {
         if (errorMessage) *errorMessage = query.lastError().text();
         return false;
     }
     while (query.next()) {
         ClientData c;
-        c.id = query.value(0).toInt();
-        c.nom = query.value(1).toString();
-        c.prenom = query.value(2).toString();
-        c.email = query.value(3).toString();
-        c.telephone = query.value(4).toString();
-        c.adresse = query.value(5).toString();
-        c.statutClient = query.value(6).toString();
-        c.remiseAccordee = query.value(7).toDouble();
-        c.canalAcquisition = query.value(8).toString();
-        c.modePaiementPrefere = query.value(9).toString();
-        c.totalAchats = query.value(10).toDouble();
-        c.frequenceAchat = query.value(11).toInt();
-        c.retardsPaiement = query.value(12).toInt();
-        c.categorie = query.value(13).toString();
-        c.limiteCredit = query.value(14).toDouble();
-        c.soldeCreditUtilise = query.value(15).toDouble();
-        c.scoreClient = query.value(16).toInt();
-        c.scoreRisque = query.value(17).toInt();
+        fillClientFromSelectQuery(query, c);
         clients.push_back(c);
     }
     return true;
@@ -384,7 +410,8 @@ bool Client::chargerParId(int id, ClientData &client, QString *errorMessage)
     QSqlQuery query;
     query.prepare("SELECT ID, NOM, PRENOM, EMAIL, TELEPHONE, ADRESSE, STATUTCLIENT, REMISEACCORDEE, "
                   "CANALACQUISITION, MODEPAIEMENTPREFERE, TOTAL_ACHATS, FREQUENCE_ACHAT, RETARDS_PAIEMENT, "
-                  "CATEGORIE, LIMITE_CREDIT, SOLDE_CREDIT_UTILISE, SCORE_CLIENT, SCORE_RISQUE FROM CLIENT WHERE ID=:id");
+                  "CATEGORIE, LIMITE_CREDIT, SOLDE_CREDIT_UTILISE, SCORE_CLIENT, SCORE_RISQUE, LATITUDE, LONGITUDE "
+                  "FROM CLIENT WHERE ID=:id");
     query.bindValue(":id", id);
     if (!query.exec()) {
         if (errorMessage) *errorMessage = query.lastError().text();
@@ -394,24 +421,7 @@ bool Client::chargerParId(int id, ClientData &client, QString *errorMessage)
         if (errorMessage) *errorMessage = "Client introuvable.";
         return false;
     }
-    client.id = query.value(0).toInt();
-    client.nom = query.value(1).toString();
-    client.prenom = query.value(2).toString();
-    client.email = query.value(3).toString();
-    client.telephone = query.value(4).toString();
-    client.adresse = query.value(5).toString();
-    client.statutClient = query.value(6).toString();
-    client.remiseAccordee = query.value(7).toDouble();
-    client.canalAcquisition = query.value(8).toString();
-    client.modePaiementPrefere = query.value(9).toString();
-    client.totalAchats = query.value(10).toDouble();
-    client.frequenceAchat = query.value(11).toInt();
-    client.retardsPaiement = query.value(12).toInt();
-    client.categorie = query.value(13).toString();
-    client.limiteCredit = query.value(14).toDouble();
-    client.soldeCreditUtilise = query.value(15).toDouble();
-    client.scoreClient = query.value(16).toInt();
-    client.scoreRisque = query.value(17).toInt();
+    fillClientFromSelectQuery(query, client);
     return true;
 }
 
@@ -421,7 +431,7 @@ bool Client::rechercherParMotCle(const QString &motCle, QList<ClientData> &clien
     QSqlQuery query;
     query.prepare("SELECT ID, NOM, PRENOM, EMAIL, TELEPHONE, ADRESSE, STATUTCLIENT, REMISEACCORDEE, "
                   "CANALACQUISITION, MODEPAIEMENTPREFERE, TOTAL_ACHATS, FREQUENCE_ACHAT, RETARDS_PAIEMENT, "
-                  "CATEGORIE, LIMITE_CREDIT, SOLDE_CREDIT_UTILISE, SCORE_CLIENT, SCORE_RISQUE "
+                  "CATEGORIE, LIMITE_CREDIT, SOLDE_CREDIT_UTILISE, SCORE_CLIENT, SCORE_RISQUE, LATITUDE, LONGITUDE "
                   "FROM CLIENT WHERE UPPER(NOM) LIKE UPPER(:k) OR UPPER(PRENOM) LIKE UPPER(:k) OR UPPER(EMAIL) LIKE UPPER(:k) "
                   "OR UPPER(TELEPHONE) LIKE UPPER(:k) OR UPPER(ADRESSE) LIKE UPPER(:k) OR TO_CHAR(ID) LIKE :k "
                   "ORDER BY ID");
@@ -432,24 +442,7 @@ bool Client::rechercherParMotCle(const QString &motCle, QList<ClientData> &clien
     }
     while (query.next()) {
         ClientData c;
-        c.id = query.value(0).toInt();
-        c.nom = query.value(1).toString();
-        c.prenom = query.value(2).toString();
-        c.email = query.value(3).toString();
-        c.telephone = query.value(4).toString();
-        c.adresse = query.value(5).toString();
-        c.statutClient = query.value(6).toString();
-        c.remiseAccordee = query.value(7).toDouble();
-        c.canalAcquisition = query.value(8).toString();
-        c.modePaiementPrefere = query.value(9).toString();
-        c.totalAchats = query.value(10).toDouble();
-        c.frequenceAchat = query.value(11).toInt();
-        c.retardsPaiement = query.value(12).toInt();
-        c.categorie = query.value(13).toString();
-        c.limiteCredit = query.value(14).toDouble();
-        c.soldeCreditUtilise = query.value(15).toDouble();
-        c.scoreClient = query.value(16).toInt();
-        c.scoreRisque = query.value(17).toInt();
+        fillClientFromSelectQuery(query, c);
         clients.push_back(c);
     }
     return true;
@@ -467,7 +460,7 @@ bool Client::rechercherEtFiltrer(const QString &motCle,
 
     QString sql = "SELECT ID, NOM, PRENOM, EMAIL, TELEPHONE, ADRESSE, STATUTCLIENT, REMISEACCORDEE, "
                   "CANALACQUISITION, MODEPAIEMENTPREFERE, TOTAL_ACHATS, FREQUENCE_ACHAT, RETARDS_PAIEMENT, "
-                  "CATEGORIE, LIMITE_CREDIT, SOLDE_CREDIT_UTILISE, SCORE_CLIENT, SCORE_RISQUE "
+                  "CATEGORIE, LIMITE_CREDIT, SOLDE_CREDIT_UTILISE, SCORE_CLIENT, SCORE_RISQUE, LATITUDE, LONGITUDE "
                   "FROM CLIENT WHERE 1=1 ";
 
     if (!motCle.trimmed().isEmpty()) {
@@ -508,24 +501,7 @@ bool Client::rechercherEtFiltrer(const QString &motCle,
 
     while (query.next()) {
         ClientData c;
-        c.id = query.value(0).toInt();
-        c.nom = query.value(1).toString();
-        c.prenom = query.value(2).toString();
-        c.email = query.value(3).toString();
-        c.telephone = query.value(4).toString();
-        c.adresse = query.value(5).toString();
-        c.statutClient = query.value(6).toString();
-        c.remiseAccordee = query.value(7).toDouble();
-        c.canalAcquisition = query.value(8).toString();
-        c.modePaiementPrefere = query.value(9).toString();
-        c.totalAchats = query.value(10).toDouble();
-        c.frequenceAchat = query.value(11).toInt();
-        c.retardsPaiement = query.value(12).toInt();
-        c.categorie = query.value(13).toString();
-        c.limiteCredit = query.value(14).toDouble();
-        c.soldeCreditUtilise = query.value(15).toDouble();
-        c.scoreClient = query.value(16).toInt();
-        c.scoreRisque = query.value(17).toInt();
+        fillClientFromSelectQuery(query, c);
         clients.push_back(c);
     }
     return true;
@@ -536,7 +512,7 @@ CreditCheckResult Client::verifierBlocageCommande(int clientId, double montantCo
     CreditCheckResult r;
     ClientData c;
     if (!chargerParId(clientId, c, errorMessage)) {
-        r.message = errorMessage ? *errorMessage : "Client introuvable.";
+        r.message = errorMessage ? *errorMessage : QStringLiteral("Client introuvable.");
         return r;
     }
 
@@ -545,16 +521,16 @@ CreditCheckResult Client::verifierBlocageCommande(int clientId, double montantCo
     r.restant = restant;
     if (c.scoreRisque < 30) {
         r.allowed = false;
-        r.message = "Commande bloquée: risque client critique détecté par le scoring IA.";
+        r.message = QStringLiteral("Bloque : risque critique.");
     } else if (montantCommande > restant) {
         r.allowed = false;
-        r.message = "Commande bloquée: limite de crédit dépassée.";
+        r.message = QStringLiteral("Bloque : credit depasse.");
     } else if (c.scoreRisque < 50 && montantCommande > (restant * 0.8)) {
         r.allowed = false;
-        r.message = "Commande bloquée préventivement: risque moyen et consommation crédit élevée.";
+        r.message = QStringLiteral("Bloque : risque / credit.");
     } else {
         r.allowed = true;
-        r.message = "Commande autorisée.";
+        r.message = QStringLiteral("Autorise.");
     }
     return r;
 }
@@ -562,7 +538,7 @@ CreditCheckResult Client::verifierBlocageCommande(int clientId, double montantCo
 bool Client::enregistrerPaiement(int clientId, double montant, const QString &note, QString *errorMessage)
 {
     if (montant <= 0.0) {
-        if (errorMessage) *errorMessage = "Le montant du paiement doit être > 0.";
+        if (errorMessage) *errorMessage = QStringLiteral("Montant > 0.");
         return false;
     }
 
@@ -612,50 +588,30 @@ bool Client::historiquePaiements(int clientId, QList<QPair<QString, QString>> &r
     return true;
 }
 
-QString Client::genererExplicationIA(const ClientData &client)
+
+bool Client::enregistrerCoordonneesGeo(int id, double latitude, double longitude, QString *errorMessage)
 {
-    ClientData tmp = client;
-    if (tmp.id <= 0) {
-        // For simulation on form fields without persisted client.
-        tmp.id = -1;
+    if (!QSqlDatabase::database().isOpen()) {
+        if (errorMessage)
+            *errorMessage = QStringLiteral("Connexion base fermee.");
+        return false;
     }
-    recalculerScoresEtCategorie(tmp);
-
-    const double utilisation = (tmp.limiteCredit > 0.0) ? ((tmp.soldeCreditUtilise / tmp.limiteCredit) * 100.0) : 0.0;
-    QString recommandation;
-    if (tmp.categorie == "VIP") {
-        recommandation = "Recommandation: fidélisation premium, offres exclusives, limite crédit flexible.";
-    } else if (tmp.categorie == "Gold") {
-        recommandation = "Recommandation: upsell ciblé et relance proactive avant baisse d'activité.";
-    } else if (tmp.categorie == "Silver") {
-        recommandation = "Recommandation: campagnes de réactivation et suivi des retards.";
-    } else {
-        recommandation = "Recommandation: onboarding commercial, risque à surveiller, crédit prudent.";
+    if (!ensureSchema(errorMessage))
+        return false;
+    if (id <= 0) {
+        if (errorMessage)
+            *errorMessage = QStringLiteral("ID client invalide.");
+        return false;
     }
-
-    QString risqueMsg = (tmp.scoreRisque >= 70) ? "Risque faible"
-                      : (tmp.scoreRisque >= 40) ? "Risque moyen"
-                                                : "Risque élevé";
-
-    return QString(
-        "Modele IA explicable (scoring multicritere)\n"
-        "- Score client: %1/100\n"
-        "- Categorie predite: %2 (remise automatique %3%)\n"
-        "- Risque paiement: %4/100 (%5)\n"
-        "- Variables clefs:\n"
-        "  * Total achats: %6\n"
-        "  * Frequence achat: %7\n"
-        "  * Retards paiement: %8\n"
-        "  * Utilisation credit: %9%\n"
-        "%10")
-        .arg(tmp.scoreClient)
-        .arg(tmp.categorie)
-        .arg(QString::number(tmp.remiseAccordee, 'f', 1))
-        .arg(tmp.scoreRisque)
-        .arg(risqueMsg)
-        .arg(QString::number(tmp.totalAchats, 'f', 2))
-        .arg(tmp.frequenceAchat)
-        .arg(tmp.retardsPaiement)
-        .arg(QString::number(utilisation, 'f', 1))
-        .arg(recommandation);
+    QSqlQuery q;
+    q.prepare(QStringLiteral("UPDATE CLIENT SET LATITUDE=:lat, LONGITUDE=:lon WHERE ID=:id"));
+    q.bindValue(QStringLiteral(":lat"), latitude);
+    q.bindValue(QStringLiteral(":lon"), longitude);
+    q.bindValue(QStringLiteral(":id"), id);
+    if (!q.exec()) {
+        if (errorMessage)
+            *errorMessage = q.lastError().text();
+        return false;
+    }
+    return true;
 }

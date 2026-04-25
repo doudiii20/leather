@@ -37,6 +37,8 @@ public:
 
     static bool validerClient(const ClientData &client, QString *errorMessage = nullptr);
     static void recalculerScoresEtCategorie(ClientData &client);
+
+    static bool enregistrerCoordonneesGeo(int id, double latitude, double longitude, QString *errorMessage = nullptr);
 };
 
 #endif // CLIENT_H
