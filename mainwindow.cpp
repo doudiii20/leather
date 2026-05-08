@@ -10,6 +10,7 @@
 #include "fournisseur.h"
 #include "produit.h"
 #include "matierepremiere.h"
+#include "firebasemanager.h"
 #include "assistantwindow.h"
 #include "chatbotwindow.h"
 #include "catalogueproduitswidget.h"
@@ -50,6 +51,7 @@
 #include <QSizePolicy>
 #include <QNetworkRequest>
 #include <QNetworkReply>
+#include <QProgressDialog>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
@@ -88,6 +90,8 @@
 #include <QStyleFactory>
 #include <QTranslator>
 #include <QEvent>
+#include <QSerialPortInfo>
+#include <QThread>
 #include <QGraphicsDropShadowEffect>
 #include <QVariantAnimation>
 #include <functional>
@@ -165,6 +169,59 @@ using namespace QtCharts;
 using namespace qrcodegen;
 
 namespace {
+
+static int mpAlertThreshold()
+{
+    bool ok = false;
+    const int envThreshold = qEnvironmentVariableIntValue("LEATHER_MP_ALERT_THRESHOLD", &ok);
+    if (ok && envThreshold >= 0)
+        return envThreshold;
+    return 10;
+}
+
+static bool mpAlertEnabled()
+{
+    const QString raw = QString::fromUtf8(qgetenv("LEATHER_MP_ALERT_ENABLED")).trimmed().toLower();
+    if (raw.isEmpty())
+        return true;
+    return raw != QStringLiteral("0") && raw != QStringLiteral("false") && raw != QStringLiteral("no");
+}
+
+static QString sendMpLowStockAlertIfNeeded(const MatierePremiere &mp)
+{
+    if (!mpAlertEnabled())
+        return QString();
+    if (mp.getReserve() >= mpAlertThreshold())
+        return QString();
+
+    const QString to = mp.getEmail().trimmed();
+    if (to.isEmpty()) {
+        return QStringLiteral("Alerte SMTP non envoyee : email MP vide.");
+    }
+
+    const QString subject = QStringLiteral("Alerte stock faible MP - %1").arg(mp.getNomCuir());
+    const QString body = QStringLiteral(
+                             "Stock faible detecte pour une matiere premiere.\n\n"
+                             "ID: %1\n"
+                             "Reference: %2\n"
+                             "Nom cuir: %3\n"
+                             "Type cuir: %4\n"
+                             "Quantite actuelle: %5\n"
+                             "Seuil: %6\n")
+                             .arg(QString::number(mp.getId()),
+                                  mp.getReference(),
+                                  mp.getNomCuir(),
+                                  mp.getTypeCuir(),
+                                  QString::number(mp.getReserve()),
+                                  QString::number(mpAlertThreshold()));
+
+    QString smtpErr;
+    if (!LeatherSmtp::sendEmail(to, subject, body, LeatherSmtp::Profile::Survey, &smtpErr)) {
+        return QStringLiteral("Alerte SMTP non envoyee : %1").arg(smtpErr);
+    }
+    return QStringLiteral("Alerte SMTP envoyee a %1 (stock=%2, seuil=%3).")
+        .arg(to, QString::number(mp.getReserve()), QString::number(mpAlertThreshold()));
+}
 
 /// Logo page d’accueil : `Resources/images/logo.png` si présent dans le .qrc, sinon pictogramme « RLH ».
 static QPixmap leatherAppLogoPixmap(int side)
@@ -689,7 +746,11 @@ struct ClientScoringRow
     int id = 0;
     QString phone;
     QString statutClient;
+    double limiteCredit = 0.0;
     QDate lastPurchaseDate;
+    double totalAchats = 0.0;
+    int frequenceAchat = 0;
+    int retardsPaiement = 0;
 };
 
 static bool fetchClientScoringRowsFromDb(QList<ClientScoringRow> &rows, QString *errorMessage)
@@ -697,10 +758,15 @@ static bool fetchClientScoringRowsFromDb(QList<ClientScoringRow> &rows, QString 
     rows.clear();
     QSqlQuery query;
     if (!query.exec(QStringLiteral(
-            "SELECT C.ID, C.TELEPHONE, C.STATUTCLIENT, MAX(P.DATE_PAIEMENT) "
+            "SELECT C.ID, C.TELEPHONE, C.STATUTCLIENT, NVL(C.LIMITE_CREDIT, 0), "
+            "       NVL(C.TOTAL_ACHATS, 0), NVL(C.FREQUENCE_ACHAT, 0), NVL(C.RETARDS_PAIEMENT, 0), "
+            "       P.LAST_PAYMENT "
             "FROM CLIENT C "
-            "LEFT JOIN CLIENT_PAIEMENTS P ON P.CLIENT_ID = C.ID "
-            "GROUP BY C.ID, C.TELEPHONE, C.STATUTCLIENT "
+            "LEFT JOIN ("
+            "    SELECT CLIENT_ID, MAX(DATE_PAIEMENT) AS LAST_PAYMENT "
+            "    FROM CLIENT_PAIEMENTS "
+            "    GROUP BY CLIENT_ID"
+            ") P ON P.CLIENT_ID = C.ID "
             "ORDER BY C.ID"))) {
         if (errorMessage)
             *errorMessage = query.lastError().text();
@@ -712,25 +778,52 @@ static bool fetchClientScoringRowsFromDb(QList<ClientScoringRow> &rows, QString 
         row.id = query.value(0).toInt();
         row.phone = query.value(1).toString().trimmed();
         row.statutClient = query.value(2).toString().trimmed();
-        row.lastPurchaseDate = query.value(3).toDate();
+        row.limiteCredit = query.value(3).toDouble();
+        row.totalAchats = query.value(4).toDouble();
+        row.frequenceAchat = query.value(5).toInt();
+        row.retardsPaiement = query.value(6).toInt();
+        row.lastPurchaseDate = query.value(7).toDate();
         rows.push_back(row);
     }
     return true;
 }
 
 /// Points du score Client Scoring (voir bloc de documentation "Client Scoring System" plus haut).
-static int computeClientScoreValue(const QDate &lastPurchaseDate, bool isPhoneValid, bool isBlocked)
+static int computeClientScoreValue(const ClientScoringRow &row, bool isPhoneValid, bool isBlocked)
 {
     int score = 0;
-    if (lastPurchaseDate.isValid()) {
-        const int monthsAgo = lastPurchaseDate.daysTo(QDate::currentDate()) / 30;
+    if (row.lastPurchaseDate.isValid()) {
+        const int monthsAgo = row.lastPurchaseDate.daysTo(QDate::currentDate()) / 30;
         if (monthsAgo <= 3)
             score += 40;
         else if (monthsAgo <= 12)
             score += 20;
+        else if (monthsAgo <= 24)
+            score += 5;
     }
+
     if (isPhoneValid)
         score += 30;
+
+    if (row.totalAchats >= 10000.0)
+        score += 15;
+    else if (row.totalAchats >= 3000.0)
+        score += 10;
+    else if (row.totalAchats > 0.0)
+        score += 5;
+
+    if (row.frequenceAchat >= 12)
+        score += 10;
+    else if (row.frequenceAchat >= 4)
+        score += 5;
+
+    if (row.retardsPaiement >= 6)
+        score -= 20;
+    else if (row.retardsPaiement >= 3)
+        score -= 10;
+    else if (row.retardsPaiement > 0)
+        score -= 5;
+
     if (isBlocked)
         score -= 100;
     return qBound(0, score, 100);
@@ -741,13 +834,56 @@ static QString computeClientStatusLabel(int score, bool isBlocked)
 {
     if (isBlocked)
         return QStringLiteral("Blocked"); // prioritaire : client bloque
+    if (score >= 90)
+        return QStringLiteral("Elite"); // 90 - 100
     if (score >= 80)
-        return QStringLiteral("VIP"); // 80 - 100
-    if (score >= 50)
+        return QStringLiteral("VIP"); // 80 - 89
+    if (score >= 60)
         return QStringLiteral("Active"); // 50 - 79
+    if (score >= 40)
+        return QStringLiteral("Promising"); // 40 - 59
     if (score >= 20)
         return QStringLiteral("Medium"); // 20 - 49
-    return QStringLiteral("Inactive"); // < 20
+    if (score >= 10)
+        return QStringLiteral("At Risk"); // 10 - 19
+    return QStringLiteral("Inactive"); // 0 - 9
+}
+
+static bool isClientBlockedStatus(const QString &rawStatus)
+{
+    QString s = rawStatus.trimmed().toLower();
+    // Normalise les accents/variantes Unicode pour rendre la regle robuste.
+    s = s.normalized(QString::NormalizationForm_D);
+    s.remove(QRegularExpression(QStringLiteral("[\\u0300-\\u036f]"))); // supprime diacritiques
+    s = s.simplified();
+    return s.contains(QStringLiteral("block"))
+           || s.contains(QStringLiteral("bloque"))
+           || s.contains(QStringLiteral("bloquer"));
+}
+
+static double computeCreditUsedForClient(double limiteCredit, int score, const QString &status)
+{
+    if (limiteCredit <= 0.0)
+        return 0.0;
+
+    // Mode "pro": exposition credit continue selon le risque (score bas => exposition forte),
+    // puis ajustee par des garde-fous metier lies au statut.
+    const double riskLevel = 1.0 - (qBound(0, score, 100) / 100.0); // 0.0 (excellent) -> 1.0 (risque eleve)
+    double usageRatio = 0.10 + (riskLevel * 0.80); // base 10% .. 90%
+
+    if (status == QStringLiteral("Blocked"))
+        usageRatio = 0.98;
+    else if (status == QStringLiteral("At Risk"))
+        usageRatio = qMax(usageRatio, 0.75);
+    else if (status == QStringLiteral("Inactive"))
+        usageRatio = qMax(usageRatio, 0.60);
+    else if (status == QStringLiteral("Elite"))
+        usageRatio = qMin(usageRatio, 0.20);
+    else if (status == QStringLiteral("VIP"))
+        usageRatio = qMin(usageRatio, 0.30);
+
+    const double clampedRatio = qBound(0.0, usageRatio, 1.0);
+    return limiteCredit * clampedRatio;
 }
 
 // ------------------- Constructeur -------------------
@@ -757,6 +893,7 @@ MainWindow::MainWindow(QWidget *parent)
     , ui(new Ui::MainWindow)
 {
     ui->setupUi(this);
+    initDoorSerialPort();
     setupHubAndBodyStack();
     setupLoginPageChrome();
     installProduitsPageResponsiveLayout();
@@ -784,6 +921,28 @@ MainWindow::MainWindow(QWidget *parent)
     m_fournisseurApiService = new FournisseurApiService(m_networkAccessManager, this);
     m_chatbotService = new ChatbotService(m_networkAccessManager, this);
     m_whatsappBusinessService = new WhatsAppBusinessService(m_networkAccessManager, this);
+    const QString firebaseApiKey = qEnvironmentVariable("FIREBASE_API_KEY", QStringLiteral("XXXXX"));
+    const QString firebaseProjectId = qEnvironmentVariable("FIREBASE_PROJECT_ID", QStringLiteral("XXXXX"));
+    m_firebaseManager = new FirebaseManager(firebaseApiKey, firebaseProjectId, m_networkAccessManager, this);
+    if (!m_firebaseManager->isConfigured()) {
+        qDebug() << "[Firebase] Configuration absente. Definir FIREBASE_API_KEY et FIREBASE_PROJECT_ID dans .env.";
+    }
+    connect(m_firebaseManager, &FirebaseManager::postFinished, this, [this](bool ok, const QString &detail) {
+        if (ok) {
+            qDebug() << "[Firebase] POST OK:" << detail;
+        } else {
+            QMessageBox::warning(this, QStringLiteral("Firebase"), detail);
+        }
+    });
+    connect(m_firebaseManager,
+            &FirebaseManager::fetchFinished,
+            this,
+            [](bool ok, const QJsonArray &documents, const QString &detail) {
+                if (ok)
+                    qDebug() << "[Firebase] GET OK:" << detail << "| count =" << documents.size();
+                else
+                    qDebug() << "[Firebase] GET FAIL:" << detail;
+            });
     connect(m_whatsappBusinessService, &WhatsAppBusinessService::sendFinished, this,
             [this](bool ok, const QString &detail) {
                 if (ok) {
@@ -822,8 +981,8 @@ MainWindow::MainWindow(QWidget *parent)
     ui->employeeTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
 
     // Ajustement de la table client
-    ui->clientTable->horizontalHeader()->setStretchLastSection(true);
-    ui->clientTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    ui->clientTable->horizontalHeader()->setStretchLastSection(false);
+    ui->clientTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
     ui->clientTable->setSelectionBehavior(QAbstractItemView::SelectRows);
     ui->clientTable->setSelectionMode(QAbstractItemView::SingleSelection);
     ui->clientTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -833,6 +992,22 @@ MainWindow::MainWindow(QWidget *parent)
         "CATEGORIE", "REMISE %", "TOTAL ACHATS", "SCORE", "STATUS",
         "SOLDE CREDIT", "SUPPR.", "MODIF."
     });
+    ui->clientTable->horizontalHeader()->setMinimumSectionSize(70);
+    ui->clientTable->horizontalHeader()->setDefaultSectionSize(110);
+    ui->clientTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);   // ID
+    ui->clientTable->horizontalHeader()->setSectionResizeMode(13, QHeaderView::Fixed);              // SUPPR.
+    ui->clientTable->horizontalHeader()->setSectionResizeMode(14, QHeaderView::Fixed);              // MODIF.
+    ui->clientTable->setColumnWidth(13, 82);
+    ui->clientTable->setColumnWidth(14, 82);
+    ui->clientTable->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
+    ui->clientTable->setTextElideMode(Qt::ElideRight);
+    ui->clientTable->setWordWrap(false);
+    ui->clientTable->verticalHeader()->setDefaultSectionSize(34);
+    {
+        QFont headerFont = ui->clientTable->horizontalHeader()->font();
+        headerFont.setBold(true);
+        ui->clientTable->horizontalHeader()->setFont(headerFont);
+    }
     // Infobulles sur les en-tetes : visibles au survol de "SCORE" / "STATUS" dans le tableau Clients.
     if (QTableWidgetItem *scoreHeader = ui->clientTable->horizontalHeaderItem(10)) {
         scoreHeader->setToolTip(
@@ -844,8 +1019,10 @@ MainWindow::MainWindow(QWidget *parent)
     if (QTableWidgetItem *statusHeader = ui->clientTable->horizontalHeaderItem(11)) {
         statusHeader->setToolTip(
             QStringLiteral("Client Scoring — Statut deduit du score :\n"
-                           "VIP 80-100 ; Active 50-79 ; Medium 20-49 ; Inactive < 20 ; Blocked si bloque.\n"
-                           "Couleurs des lignes : violet VIP, vert Active, jaune Medium, rouge Inactive, gris Blocked.\n"
+                           "Elite 90-100 ; VIP 80-89 ; Active 60-79 ; Promising 40-59 ; Medium 20-39 ; "
+                           "At Risk 10-19 ; Inactive 0-9 ; Blocked si bloque.\n"
+                           "Couleurs : violet fonce Elite, violet VIP, vert Active, bleu clair Promising, "
+                           "jaune Medium, orange At Risk, rouge Inactive, gris Blocked.\n"
                            "\"Not analyzed\" = pas encore analyse."));
     }
 
@@ -885,20 +1062,8 @@ MainWindow::MainWindow(QWidget *parent)
             navLay->insertWidget(spacerIdx >= 0 ? spacerIdx : qMax(0, navLay->count() - 2), btnGlobalChatbot);
             connect(btnGlobalChatbot, &QPushButton::clicked, this, &MainWindow::onGlobalChatbotClicked);
 
-            // Cree le bouton Maps s'il n'existe pas dans le .ui.
-            QPushButton *btnMaps = this->findChild<QPushButton *>(QStringLiteral("btnMaps"));
-            if (!btnMaps) {
-                btnMaps = new QPushButton(QStringLiteral("Maps"), ui->topNavBar);
-                btnMaps->setObjectName(QStringLiteral("btnMaps"));
-                btnMaps->setMinimumHeight(36);
-                btnMaps->setCursor(Qt::PointingHandCursor);
-                navLay->insertWidget(spacerIdx >= 0 ? spacerIdx : qMax(0, navLay->count() - 2), btnMaps);
-            }
-            // Meme style que Chatbot (sinon bouton du .ui garde le theme systeme bleu).
-            btnMaps->setStyleSheet(btnGlobalChatbot->styleSheet());
-
-            // Branche toujours le bouton Maps vers openMap.
-            connect(btnMaps, &QPushButton::clicked, this, &MainWindow::openMap, Qt::UniqueConnection);
+            // Bouton Maps retire de la barre du haut principale.
+            // La carte reste accessible via le bouton Maps de la page Fournisseurs.
         }
     }
 
@@ -913,6 +1078,8 @@ MainWindow::MainWindow(QWidget *parent)
         connect(ui->btnForgotPassword, &QPushButton::clicked, this, &MainWindow::onForgotPasswordRequested);
     if (ui->btnFaceLogin)
         connect(ui->btnFaceLogin, &QPushButton::clicked, this, &MainWindow::onFaceLoginRequested);
+    if (ui->btnRfidLogin)
+        connect(ui->btnRfidLogin, &QPushButton::clicked, this, &MainWindow::onRfidLoginRequested);
     installClientPageResponsiveLayout();
     setupClientValidators();
     setupClientFicheScrollAndHeader();
@@ -1039,7 +1206,8 @@ MainWindow::MainWindow(QWidget *parent)
                 "  color: #ffffff;"
                 "  font-weight: 700;"
                 "  border: none;"
-                "  padding: 6px;"
+                "  border-right: 1px solid #7a4314;"
+                "  padding: 6px 10px;"
                 "}"));
         }
 
@@ -2552,6 +2720,27 @@ void MainWindow::connectSidebar()
                                   QStringLiteral("Preparation du schema MATIERES_PREMIERES :\n%1").arg(merr));
             return;
         }
+        // Evite un ecran vide a l'ouverture: on repart d'un etat filtre neutre.
+        m_mpFilterDisponible = false;
+        m_mpSeuilCritique = -1;
+        if (ui->lineEditSearch_6)
+            ui->lineEditSearch_6->clear();
+        if (ui->comboBoxTri_mp) {
+            ui->comboBoxTri_mp->blockSignals(true);
+            ui->comboBoxTri_mp->setCurrentIndex(0);
+            ui->comboBoxTri_mp->blockSignals(false);
+        }
+        if (ui->comboBoxOrdre_mp) {
+            ui->comboBoxOrdre_mp->blockSignals(true);
+            ui->comboBoxOrdre_mp->setCurrentIndex(0);
+            ui->comboBoxOrdre_mp->blockSignals(false);
+        }
+        if (ui->page_3) {
+            if (QLineEdit *topSearch = ui->page_3->findChild<QLineEdit *>(QStringLiteral("clientTopSearchEdit")))
+                topSearch->clear();
+            if (QComboBox *topFilter = ui->page_3->findChild<QComboBox *>(QStringLiteral("matieresTopFilterCombo")))
+                topFilter->setCurrentIndex(0);
+        }
         MatierePremiere::seedDemoIfEmpty(&merr);
         refreshMatieresTable();
     });
@@ -2731,7 +2920,7 @@ void MainWindow::setupLoginPageChrome()
             "}"
             "QPushButton#btnAjouter_8:hover { background: #6f3708; }"
             "QPushButton#btnAjouter_8:pressed { background: #4d2504; }"
-            "QPushButton#btnSignUp, QPushButton#btnForgotPassword, QPushButton#btnFaceLogin {"
+            "QPushButton#btnSignUp, QPushButton#btnForgotPassword, QPushButton#btnFaceLogin, QPushButton#btnRfidLogin {"
             "  min-height: 34px;"
             "  border-radius: 9px;"
             "  font-weight: 600;"
@@ -3828,6 +4017,14 @@ bool leatherMigrateAppUsersEmailColumn(QSqlDatabase &db, QString *errorMessage)
     return true;
 }
 
+QString leatherExtractUidFromDoorLine(const QString &line)
+{
+    const int sep = line.indexOf(QLatin1Char(':'));
+    if (sep < 0)
+        return QString();
+    return line.mid(sep + 1).trimmed();
+}
+
 } // namespace
 
 bool MainWindow::ensureAuthSchema(QString *errorMessage)
@@ -3858,6 +4055,215 @@ bool MainWindow::ensureAuthSchema(QString *errorMessage)
     if (errorMessage)
         *errorMessage = err;
     return false;
+}
+
+bool MainWindow::ensureDoorAccessSchema(QString *errorMessage)
+{
+    QSqlQuery q(db);
+    const QString createSql = QStringLiteral(
+        "CREATE TABLE DOOR_ACCESS_LOGS ("
+        "ID NUMBER PRIMARY KEY, "
+        "EVENT_STATUS VARCHAR2(16) NOT NULL, "
+        "CARD_UID VARCHAR2(64), "
+        "RAW_LINE_TXT VARCHAR2(255), "
+        "CREATED_AT DATE DEFAULT SYSDATE)");
+
+    if (q.exec(createSql))
+        return true;
+
+    const QString err = q.lastError().text().trimmed();
+    if (err.contains(QStringLiteral("ORA-00955"), Qt::CaseInsensitive))
+        return true;
+
+    if (errorMessage)
+        *errorMessage = err;
+    return false;
+}
+
+void MainWindow::logDoorAccessEvent(const QString &status, const QString &uid, const QString &rawLine)
+{
+    if (!ensureDbOpenForProduits())
+        return;
+
+    QString schemaErr;
+    if (!ensureDoorAccessSchema(&schemaErr)) {
+        qDebug() << "[DoorAccess] Schema indisponible:" << schemaErr;
+        return;
+    }
+
+    QSqlQuery ins(db);
+    ins.prepare(QStringLiteral(
+        "INSERT INTO DOOR_ACCESS_LOGS (EVENT_STATUS, CARD_UID, RAW_LINE_TXT) "
+        "VALUES (:s, :u, :r)"));
+    ins.bindValue(QStringLiteral(":s"), status.left(16));
+    ins.bindValue(QStringLiteral(":u"), uid.left(64));
+    ins.bindValue(QStringLiteral(":r"), rawLine.left(255));
+
+    if (!ins.exec())
+        qDebug() << "[DoorAccess] Insert KO:" << ins.lastError().text().trimmed();
+}
+
+QString MainWindow::extractRfidCardFromLine(const QString &line) const
+{
+    const QString raw = line.trimmed();
+    static const QRegularExpression rxDirect(
+        QStringLiteral("^\\s*RFID\\s*:\\s*([A-Za-z0-9_-]+)\\s*$"),
+        QRegularExpression::CaseInsensitiveOption);
+    const QRegularExpressionMatch m = rxDirect.match(raw);
+    if (m.hasMatch())
+        return m.captured(1).trimmed().toUpper();
+
+    static const QRegularExpression rxHex(QStringLiteral("\\b([0-9A-Fa-f]{1,2})\\b"));
+    QStringList bytes;
+    auto it = rxHex.globalMatch(raw);
+    while (it.hasNext()) {
+        const QRegularExpressionMatch hm = it.next();
+        bytes << hm.captured(1).rightJustified(2, QLatin1Char('0')).toUpper();
+    }
+    if (!bytes.isEmpty())
+        return bytes.join(QString()).trimmed();
+
+    return QString();
+}
+
+bool MainWindow::findEmployeByCardUid(const QString &idCarte, QString *cinEmploye, QString *nomEmploye, QString *errorMessage)
+{
+    if (cinEmploye)
+        cinEmploye->clear();
+    if (nomEmploye)
+        nomEmploye->clear();
+
+    QString normalizedCard = idCarte.trimmed().toUpper();
+    normalizedCard.remove(QRegularExpression(QStringLiteral("[^0-9A-Z]")));
+
+    if (normalizedCard.isEmpty()) {
+        if (errorMessage)
+            *errorMessage = QStringLiteral("UID RFID invalide.");
+        return false;
+    }
+
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral(
+        "SELECT CIN, NOM FROM EMPLOYES "
+        "WHERE UPPER(REPLACE(REPLACE(REPLACE(TRIM(ID_CARTE), ' ', ''), '-', ''), ':', '')) = :c"));
+    q.bindValue(QStringLiteral(":c"), normalizedCard);
+    if (!q.exec()) {
+        if (errorMessage)
+            *errorMessage = q.lastError().text().trimmed();
+        return false;
+    }
+    if (!q.next())
+        return false;
+
+    if (cinEmploye)
+        *cinEmploye = q.value(0).toString().trimmed();
+    if (nomEmploye)
+        *nomEmploye = q.value(1).toString().trimmed();
+    return true;
+}
+
+bool MainWindow::resolveNextPointageType(const QString &idCarte, QString *typeOut, QString *errorMessage)
+{
+    if (!typeOut)
+        return false;
+
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral(
+        "SELECT EVENT_STATUS FROM DOOR_ACCESS_LOGS "
+        "WHERE UPPER(CARD_UID)=UPPER(:card) "
+        "AND EVENT_STATUS IN ('ENTREE','SORTIE') "
+        "ORDER BY CREATED_AT DESC, ID DESC FETCH FIRST 1 ROWS ONLY"));
+    q.bindValue(QStringLiteral(":card"), idCarte.trimmed());
+    if (!q.exec()) {
+        if (errorMessage)
+            *errorMessage = q.lastError().text().trimmed();
+        return false;
+    }
+    if (!q.next()) {
+        *typeOut = QStringLiteral("ENTREE");
+        return true;
+    }
+    const QString lastType = q.value(0).toString().trimmed().toUpper();
+    *typeOut = (lastType == QStringLiteral("SORTIE")) ? QStringLiteral("ENTREE") : QStringLiteral("SORTIE");
+    return true;
+}
+
+bool MainWindow::insertEmployePointage(const QString &idCarte, const QString &cinEmploye, const QString &nomEmploye, const QString &type, QString *errorMessage)
+{
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral(
+        "INSERT INTO DOOR_ACCESS_LOGS (EVENT_STATUS, CARD_UID, RAW_LINE_TXT) "
+        "VALUES (:s, :u, :r)"));
+    q.bindValue(QStringLiteral(":s"), type.trimmed().toUpper().left(16));
+    q.bindValue(QStringLiteral(":u"), idCarte.trimmed().left(64));
+    q.bindValue(QStringLiteral(":r"),
+                QStringLiteral("POINTAGE %1 | CIN=%2 | NOM=%3")
+                    .arg(type.trimmed().toUpper(), cinEmploye, nomEmploye)
+                    .left(255));
+    if (q.exec())
+        return true;
+    if (errorMessage)
+        *errorMessage = q.lastError().text().trimmed();
+    return false;
+}
+
+void MainWindow::processFaceRfidLine(const QString &line)
+{
+    if (!m_waitingRfidAfterFace)
+        return;
+    if (!ensureDbOpenForProduits()) {
+        logDoorAccessEvent(QStringLiteral("DB_OFF"), QString(), line);
+        if (statusBar())
+            statusBar()->showMessage(QStringLiteral("Connexion base indisponible. RFID non verifie."), 5000);
+        return;
+    }
+
+    const QString idCarte = extractRfidCardFromLine(line);
+    if (idCarte.isEmpty())
+        return;
+
+    QString cinEmploye;
+    QString nom;
+    QString err;
+    if (!findEmployeByCardUid(idCarte, &cinEmploye, &nom, &err)) {
+        logDoorAccessEvent(err.isEmpty() ? QStringLiteral("UNKNOWN_CARD") : QStringLiteral("LOOKUP_ERR"), idCarte, line);
+        if (!err.isEmpty())
+            qDebug() << "[FaceRFID] lookup KO:" << err;
+        if (statusBar())
+            statusBar()->showMessage(
+                err.isEmpty()
+                    ? QStringLiteral("Carte RFID refusee: badge non autorise.")
+                    : QStringLiteral("Verification RFID impossible: %1").arg(err),
+                6000);
+        if (err.isEmpty()) {
+            QMessageBox::warning(this,
+                                 QStringLiteral("Acces non autorise"),
+                                 QStringLiteral("Acces refuse.\nCette carte RFID n'est pas autorisee pour cet espace."));
+        }
+        return;
+    }
+
+    QString pointageType;
+    if (!resolveNextPointageType(idCarte, &pointageType, &err)) {
+        logDoorAccessEvent(QStringLiteral("TYPE_ERR"), idCarte, err.left(200));
+        return;
+    }
+    if (!insertEmployePointage(idCarte, cinEmploye, nom, pointageType, &err)) {
+        logDoorAccessEvent(QStringLiteral("POINTAGE_ERR"), idCarte, err.left(200));
+        return;
+    }
+
+    m_facePendingEmployeId = cinEmploye.toInt();
+    m_facePendingEmployeNom = nom;
+    m_waitingRfidAfterFace = false;
+    if (m_faceRfidTimeoutTimer)
+        m_faceRfidTimeoutTimer->stop();
+
+    if (m_doorSerialPort && m_doorSerialPort->isOpen()) {
+        m_doorSerialPort->write("DOOR:OPEN\n");
+        m_doorSerialPort->flush();
+    }
+    finishFaceIdLoginSession();
 }
 
 bool MainWindow::ensureDefaultAdminUser(QString *errorMessage)
@@ -3969,25 +4375,300 @@ void MainWindow::on_btnAjouter_8_clicked()
     QMessageBox::information(this, QStringLiteral("Connexion"), QStringLiteral("Connexion reussie."));
 }
 
+void MainWindow::on_btnRfidLogin_clicked()
+{
+    onRfidLoginRequested();
+}
+
 void MainWindow::onFaceLoginRequested()
 {
+    if (!FaceLoginDialog::isOpenCvAvailable()) {
+        QMessageBox::warning(this, QStringLiteral("Face ID"),
+                             QStringLiteral("La reconnaissance faciale est indisponible.\n"
+                                            "Activez OpenCV pour utiliser ce mode."));
+        return;
+    }
+
     FaceLoginDialog dlg(this);
     if (dlg.exec() != QDialog::Accepted)
         return;
+
+    // Mode Face ID seul : la connexion est validee immediatement apres verification du visage.
+    m_waitingRfidAfterFace = false;
+    m_faceStepValidated = true;
+    m_facePendingEmployeId = -1;
+    m_facePendingEmployeNom.clear();
+    m_doorSerialBuffer.clear();
+
+    if (m_faceRfidTimeoutTimer)
+        m_faceRfidTimeoutTimer->stop();
+
     finishFaceIdLoginSession();
+    if (statusBar())
+        statusBar()->showMessage(
+            QStringLiteral("Visage reconnu. Connexion Face ID reussie."),
+            8000);
+}
+
+void MainWindow::onRfidLoginRequested()
+{
+    initDoorSerialPort();
+    if (!m_doorSerialPort || !m_doorSerialPort->isOpen()) {
+        QMessageBox::warning(this, QStringLiteral("Connexion"),
+                             QStringLiteral("Lecteur RFID indisponible (port serie Arduino non ouvert)."));
+        return;
+    }
+
+    if (!m_faceRfidTimeoutTimer) {
+        m_faceRfidTimeoutTimer = new QTimer(this);
+        m_faceRfidTimeoutTimer->setSingleShot(true);
+        connect(m_faceRfidTimeoutTimer, &QTimer::timeout, this, &MainWindow::onFaceRfidTimeout);
+    }
+
+    m_waitingRfidAfterFace = true;
+    m_faceStepValidated = false;
+    m_facePendingEmployeId = -1;
+    m_facePendingEmployeNom.clear();
+    m_doorSerialBuffer.clear();
+
+    m_faceRfidTimeoutTimer->start(20000);
+    if (statusBar()) {
+        const QString portLabel =
+            (m_doorSerialPort && m_doorSerialPort->isOpen())
+                ? m_doorSerialPort->portName()
+                : QStringLiteral("N/A");
+        statusBar()->showMessage(
+            QStringLiteral("Mode RFID active (port %1). Presentez votre carte RFID.").arg(portLabel),
+            8000);
+    }
+    QMessageBox::information(this,
+                             QStringLiteral("Authentification RFID"),
+                             QStringLiteral("Mode RFID active.\nVeuillez presenter votre carte RFID devant le lecteur."));
+}
+
+void MainWindow::initDoorSerialPort()
+{
+    if (!m_doorSerialPort) {
+        m_doorSerialPort = new QSerialPort(this);
+        m_doorSerialPort->setBaudRate(QSerialPort::Baud9600);
+        m_doorSerialPort->setDataBits(QSerialPort::Data8);
+        m_doorSerialPort->setParity(QSerialPort::NoParity);
+        m_doorSerialPort->setStopBits(QSerialPort::OneStop);
+        m_doorSerialPort->setFlowControl(QSerialPort::NoFlowControl);
+    } else if (m_doorSerialPort->isOpen()) {
+        return;
+    }
+
+    // Port force prioritaire (modifiable via variable d'environnement DOOR_SERIAL_PORT),
+    // puis fallback auto vers les ports series Arduino/USB.
+    const QString forcedPort = qEnvironmentVariable("DOOR_SERIAL_PORT", QStringLiteral("COM6")).trimmed();
+    QStringList candidates;
+    if (!forcedPort.isEmpty())
+        candidates << forcedPort;
+    candidates << QStringLiteral("COM3")
+               << QStringLiteral("COM4")
+               << QStringLiteral("COM5")
+               << QStringLiteral("COM6")
+               << QStringLiteral("COM7")
+               << QStringLiteral("COM8")
+               << QStringLiteral("COM9");
+    const auto ports = QSerialPortInfo::availablePorts();
+    for (const QSerialPortInfo &portInfo : ports) {
+        const QString haystack =
+            (portInfo.description() + QLatin1Char(' ') + portInfo.manufacturer()).toLower();
+        if (haystack.contains(QStringLiteral("arduino"))
+            || haystack.contains(QStringLiteral("usb"))
+            || haystack.contains(QStringLiteral("ch340"))
+            || haystack.contains(QStringLiteral("cp210"))) {
+            if (!candidates.contains(portInfo.portName()))
+                candidates << portInfo.portName();
+        }
+    }
+    for (const QSerialPortInfo &portInfo : ports) {
+        if (!candidates.contains(portInfo.portName()))
+            candidates << portInfo.portName();
+    }
+
+    for (const QString &portName : candidates) {
+        m_doorSerialPort->setPortName(portName);
+        if (m_doorSerialPort->open(QIODevice::ReadWrite)) {
+            qDebug() << "Porte serie connectee sur" << portName;
+            connect(m_doorSerialPort, &QSerialPort::readyRead,
+                    this, &MainWindow::onDoorSerialReadyRead, Qt::UniqueConnection);
+            return;
+        }
+    }
+
+    qDebug() << "Port serie porte indisponible:" << m_doorSerialPort->errorString();
+}
+
+void MainWindow::sendFaceOk()
+{
+    if (!m_doorSerialPort)
+        return;
+
+    if (!m_doorSerialPort->isOpen()) {
+        const QString lastPort = m_doorSerialPort->portName();
+        if (!lastPort.isEmpty()) {
+            m_doorSerialPort->setPortName(lastPort);
+            m_doorSerialPort->open(QIODevice::ReadWrite);
+        }
+    }
+
+    if (!m_doorSerialPort->isOpen()) {
+        qDebug() << "FACE_OK non envoye: port serie ferme";
+        return;
+    }
+
+    qint64 lastWritten = -1;
+    for (int i = 0; i < 4; ++i) {
+        lastWritten = m_doorSerialPort->write("FACE_OK\n");
+        m_doorSerialPort->flush();
+        m_doorSerialPort->waitForBytesWritten(200);
+        QThread::msleep(120);
+    }
+    qDebug() << "FACE_OK envoye (x4), dernier envoi octets:" << lastWritten
+             << "port:" << m_doorSerialPort->portName();
+}
+
+void MainWindow::onDoorSerialReadyRead()
+{
+    if (!m_doorSerialPort)
+        return;
+
+    const QByteArray chunk = m_doorSerialPort->readAll();
+    if (chunk.isEmpty())
+        return;
+    m_doorSerialBuffer += chunk;
+    qDebug() << "[DoorSerial][raw]" << QString::fromUtf8(chunk).trimmed();
+
+    auto processLine = [this](const QString &line) {
+        if (line.isEmpty())
+            return;
+
+        qDebug() << "[DoorSerial]" << line;
+
+        const QString upper = line.toUpper();
+        if (!m_waitingRfidAfterFace)
+            return;
+
+        // Compatibilite Arduino: certains sketches envoient seulement
+        // "Acces autorise -> Servo ON" / "Acces refuse" sans UID detaille.
+        if (upper.contains(QStringLiteral("ACCES AUTORISE"))
+            || upper.contains(QStringLiteral("ACCESS GRANTED"))
+            || upper.contains(QStringLiteral("SERVO ON"))) {
+            logDoorAccessEvent(QStringLiteral("ALLOW"), QString(), line);
+            m_waitingRfidAfterFace = false;
+            if (m_faceRfidTimeoutTimer)
+                m_faceRfidTimeoutTimer->stop();
+            m_facePendingEmployeId = -1;
+            if (m_facePendingEmployeNom.isEmpty())
+                m_facePendingEmployeNom = QStringLiteral("Employe RFID");
+            finishFaceIdLoginSession();
+            return;
+        }
+
+        if (upper.contains(QStringLiteral("ACCES REFUSE"))
+            || upper.contains(QStringLiteral("ACCESS DENIED"))
+            || upper.contains(QStringLiteral("RFID DENIED"))
+            || upper.contains(QStringLiteral("CARD_DENY"))) {
+            logDoorAccessEvent(QStringLiteral("DENY"), QString(), line);
+            if (statusBar())
+                statusBar()->showMessage(QStringLiteral("Carte RFID refusee."), 6000);
+            QMessageBox::warning(this, QStringLiteral("Acces non autorise"),
+                                 QStringLiteral("Acces refuse.\nCette carte RFID n'est pas autorisee pour cet espace."));
+            return;
+        }
+
+        const QString parsedUid = extractRfidCardFromLine(line);
+        if (upper.startsWith(QStringLiteral("RFID:"))
+            || upper.contains(QStringLiteral("UID"))
+            || !parsedUid.isEmpty()) {
+            processFaceRfidLine(line);
+            return;
+        }
+
+        if (upper.contains(QStringLiteral("CARD_DENY"))
+            || upper.contains(QStringLiteral("ACCES REFUSE"))
+            || upper.contains(QStringLiteral("RFID DENIED"))) {
+            const QString uid = leatherExtractUidFromDoorLine(line);
+            logDoorAccessEvent(QStringLiteral("DENY"), uid, line);
+        }
+    };
+
+    while (true) {
+        const int lfIdx = m_doorSerialBuffer.indexOf('\n');
+        const int crIdx = m_doorSerialBuffer.indexOf('\r');
+        int splitIdx = -1;
+        if (lfIdx >= 0 && crIdx >= 0)
+            splitIdx = qMin(lfIdx, crIdx);
+        else if (lfIdx >= 0)
+            splitIdx = lfIdx;
+        else if (crIdx >= 0)
+            splitIdx = crIdx;
+
+        if (splitIdx < 0)
+            break;
+
+        const QByteArray rawLine = m_doorSerialBuffer.left(splitIdx);
+        m_doorSerialBuffer.remove(0, splitIdx + 1);
+        while (!m_doorSerialBuffer.isEmpty()
+               && (m_doorSerialBuffer.front() == '\n' || m_doorSerialBuffer.front() == '\r')) {
+            m_doorSerialBuffer.remove(0, 1);
+        }
+
+        const QString line = QString::fromUtf8(rawLine).trimmed();
+        processLine(line);
+    }
+
+    // Fallback: certains lecteurs envoient sans separateur de ligne.
+    if (m_waitingRfidAfterFace && !m_doorSerialBuffer.isEmpty()) {
+        const QString tail = QString::fromUtf8(m_doorSerialBuffer).trimmed();
+        const QString tailUpper = tail.toUpper();
+        const QString parsedUid = extractRfidCardFromLine(tail);
+        if (!tail.isEmpty()
+            && (!parsedUid.isEmpty() && parsedUid.size() >= 8)
+            && (tailUpper.contains(QStringLiteral("RFID")) || tailUpper.contains(QStringLiteral("UID"))
+                || tailUpper.contains(QStringLiteral("CARD")) || tail.contains(QLatin1Char(':')))) {
+            processLine(tail);
+            m_doorSerialBuffer.clear();
+        }
+    }
+}
+
+void MainWindow::onFaceRfidTimeout()
+{
+    if (!m_waitingRfidAfterFace)
+        return;
+
+    m_waitingRfidAfterFace = false;
+    m_faceStepValidated = false;
+    m_facePendingEmployeId = -1;
+    m_facePendingEmployeNom.clear();
+    QMessageBox::warning(this, QStringLiteral("Connexion"),
+                         QStringLiteral("Aucune carte RFID valide detectee dans le delai. Recommencez."));
 }
 
 void MainWindow::finishFaceIdLoginSession()
 {
     applyAuthenticationUiState(true);
     if (ui->headerUserLabel)
-        ui->headerUserLabel->setText(QStringLiteral("Administrateur (Face ID)"));
+        ui->headerUserLabel->setText(
+            m_facePendingEmployeNom.isEmpty()
+                ? (m_faceStepValidated ? QStringLiteral("Administrateur (Face+RFID)")
+                                       : QStringLiteral("Administrateur (RFID)"))
+                : (m_faceStepValidated ? QStringLiteral("%1 (Face+RFID)").arg(m_facePendingEmployeNom)
+                                       : QStringLiteral("%1 (RFID)").arg(m_facePendingEmployeNom)));
     applyProfileDisplayFromSettings();
     if (m_bodyStack)
         m_bodyStack->setCurrentIndex(0);
     updateShellChromeVisibility();
-    QMessageBox::information(this, QStringLiteral("Reconnaissance faciale"),
-                             QStringLiteral("Connexion par caméra réussie."));
+    const QString msg = m_facePendingEmployeNom.isEmpty()
+        ? (m_faceStepValidated ? QStringLiteral("Connexion Face ID reussie.")
+                               : QStringLiteral("Connexion RFID reussie."))
+        : QStringLiteral("Bonjour %1,\nVotre pointage a ete enregistre avec succes.").arg(m_facePendingEmployeNom);
+    QMessageBox::information(this, QStringLiteral("Connexion"), msg);
+    m_faceStepValidated = false;
 }
 
 void MainWindow::on_btnSignUp_clicked()
@@ -4274,7 +4955,7 @@ void MainWindow::installClientPageResponsiveLayout()
     mainLay->addWidget(topNavCard, 0);
 
     auto *contentRow = new QHBoxLayout();
-    contentRow->setSpacing(14);
+    contentRow->setSpacing(22);
     mainLay->addLayout(contentRow, 1);
 
     auto *leftPanel = new QWidget(page);
@@ -4292,7 +4973,7 @@ void MainWindow::installClientPageResponsiveLayout()
     rightPanel->setObjectName(QStringLiteral("clientTableZone"));
     rightPanel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     auto *rightCol = new QVBoxLayout(rightPanel);
-    rightCol->setContentsMargins(0, 0, 0, 0);
+    rightCol->setContentsMargins(4, 0, 0, 0);
     rightCol->setSpacing(10);
     contentRow->addWidget(rightPanel, 1);
 
@@ -4405,6 +5086,28 @@ void MainWindow::setupClientFicheScrollAndHeader()
     ui->lineEdit_remiseC->setPlaceholderText(QStringLiteral("Remise accordee (%)"));
     ui->lineEdit_canalC->setPlaceholderText(QStringLiteral("Canal d'acquisition"));
     ui->lineEdit_modeC->setPlaceholderText(QStringLiteral("Mode de paiement prefere"));
+    if (ui->comboBox_statutC) {
+        const QString currentStatus = ui->comboBox_statutC->currentText().trimmed();
+        ui->comboBox_statutC->clear();
+        ui->comboBox_statutC->addItems({
+            QStringLiteral("actif"),
+            QStringLiteral("inactif"),
+            QStringLiteral("bloqué"),
+            QStringLiteral("Elite"),
+            QStringLiteral("VIP"),
+            QStringLiteral("Active"),
+            QStringLiteral("Promising"),
+            QStringLiteral("Medium"),
+            QStringLiteral("At Risk"),
+            QStringLiteral("Inactive"),
+            QStringLiteral("Blocked")
+        });
+        if (!currentStatus.isEmpty()) {
+            if (ui->comboBox_statutC->findText(currentStatus) < 0)
+                ui->comboBox_statutC->addItem(currentStatus);
+            ui->comboBox_statutC->setCurrentText(currentStatus);
+        }
+    }
 
     formLay->addRow(new QLabel(QStringLiteral("CIN"), formWrap), ui->lineEdit_IDC);
     formLay->addRow(new QLabel(QStringLiteral("Nom"), formWrap), ui->lineEdit_nomC);
@@ -4553,7 +5256,8 @@ void MainWindow::setupClientUiEnhancements()
         topAnalyzeBtn->setToolTip(
             QStringLiteral("Client Scoring : lit la base, appelle Numverify si besoin, remplit les colonnes SCORE et STATUS.\n"
                            "Score 0-100 : +40 (achat <=3 mois), +20 (3-12 mois), +30 (tel valide), -100 si bloque.\n"
-                           "Statuts : VIP 80-100, Active 50-79, Medium 20-49, Inactive <20, Blocked si bloque.\n"
+                           "Statuts : Elite 90-100, VIP 80-89, Active 60-79, Promising 40-59, "
+                           "Medium 20-39, At Risk 10-19, Inactive 0-9, Blocked si bloque.\n"
                            "Voir aussi l infobulle sur les en-tetes SCORE / STATUS du tableau."));
         connect(topAnalyzeBtn, &QPushButton::clicked, this, &MainWindow::onAnalyzeClientsClicked);
     }
@@ -4668,6 +5372,7 @@ void MainWindow::setupClientUiEnhancements()
         ui->clientTable->setShowGrid(true);
         ui->clientTable->verticalHeader()->setVisible(false);
         ui->clientTable->horizontalHeader()->setDefaultAlignment(Qt::AlignCenter);
+        ui->clientTable->horizontalHeader()->setMinimumHeight(36);
     }
 
     if (ui->btnRechercher_3) {
@@ -4870,6 +5575,8 @@ bool MainWindow::isNumverifyPhoneValid(const QString &phone, bool *isValid, QStr
 
     QString apiKey = qEnvironmentVariable("NUMVERIFY_API_KEY").trimmed();
     if (apiKey.isEmpty())
+        apiKey = qEnvironmentVariable("NUMVERIFY_KEY").trimmed();
+    if (apiKey.isEmpty())
         apiKey = qEnvironmentVariable("NUMVERIFY-KEY").trimmed();
     if (apiKey.isEmpty()) {
         if (errorMessage)
@@ -4884,21 +5591,44 @@ bool MainWindow::isNumverifyPhoneValid(const QString &phone, bool *isValid, QStr
         return false;
     }
 
-    QUrl url(QStringLiteral("https://apilayer.net/api/validate"));
-    QUrlQuery query;
-    query.addQueryItem(QStringLiteral("access_key"), apiKey);
-    query.addQueryItem(QStringLiteral("number"), numberForApi);
-    if (numberForApi.startsWith(QStringLiteral("+216")))
-        query.addQueryItem(QStringLiteral("country_code"), QStringLiteral("TN"));
-    url.setQuery(query);
+    struct NumverifyEndpoint
+    {
+        QUrl url;
+        bool useApiLayerHeader = false;
+    };
+
+    QVector<NumverifyEndpoint> endpoints;
+    {
+        QUrl legacyUrl(QStringLiteral("https://apilayer.net/api/validate"));
+        QUrlQuery legacyQuery;
+        legacyQuery.addQueryItem(QStringLiteral("access_key"), apiKey);
+        legacyQuery.addQueryItem(QStringLiteral("number"), numberForApi);
+        if (numberForApi.startsWith(QStringLiteral("+216")))
+            legacyQuery.addQueryItem(QStringLiteral("country_code"), QStringLiteral("TN"));
+        legacyUrl.setQuery(legacyQuery);
+        endpoints.push_back({legacyUrl, false});
+    }
+    {
+        QUrl modernUrl(QStringLiteral("https://api.apilayer.com/number_verification/validate"));
+        QUrlQuery modernQuery;
+        modernQuery.addQueryItem(QStringLiteral("number"), numberForApi);
+        if (numberForApi.startsWith(QStringLiteral("+216")))
+            modernQuery.addQueryItem(QStringLiteral("country_code"), QStringLiteral("TN"));
+        modernUrl.setQuery(modernQuery);
+        endpoints.push_back({modernUrl, true});
+    }
 
     constexpr int kMaxNumverifyAttempts = 6;
-    for (int attempt = 0; attempt < kMaxNumverifyAttempts; ++attempt) {
-        numverifyThrottleBeforeNextRequest();
+    constexpr int kNumverifyTimeoutMs = 15000;
+    for (const NumverifyEndpoint &endpoint : endpoints) {
+        for (int attempt = 0; attempt < kMaxNumverifyAttempts; ++attempt) {
+            numverifyThrottleBeforeNextRequest();
 
-        QNetworkRequest req(url);
-        req.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("RoyalLeatherHouse/1.0 (Qt)"));
-        QNetworkReply *reply = m_networkAccessManager->get(req);
+            QNetworkRequest req(endpoint.url);
+            req.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("RoyalLeatherHouse/1.0 (Qt)"));
+            if (endpoint.useApiLayerHeader)
+                req.setRawHeader("apikey", apiKey.toUtf8());
+            QNetworkReply *reply = m_networkAccessManager->get(req);
         QEventLoop loop;
         QTimer timeout;
         timeout.setSingleShot(true);
@@ -4908,100 +5638,140 @@ bool MainWindow::isNumverifyPhoneValid(const QString &phone, bool *isValid, QStr
             loop.quit();
         });
         connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
-        timeout.start(8000);
+            timeout.start(kNumverifyTimeoutMs);
         loop.exec();
 
         numverifyMarkRequestEnded();
 
-        const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        const QByteArray payload = reply->readAll();
-        const QString errStr = reply->errorString();
-        const bool looksLike429 = (httpStatus == 429)
-                                  || errStr.contains(QStringLiteral("429"), Qt::CaseInsensitive)
-                                  || errStr.contains(QStringLiteral("Too Many Requests"), Qt::CaseInsensitive);
+            const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const QByteArray payload = reply->readAll();
+            const QString errStr = reply->errorString();
+            const bool looksLike429 = (httpStatus == 429)
+                                      || errStr.contains(QStringLiteral("429"), Qt::CaseInsensitive)
+                                      || errStr.contains(QStringLiteral("Too Many Requests"), Qt::CaseInsensitive);
+            const bool looksLikeTemporaryNetworkIssue =
+                (reply->error() == QNetworkReply::TimeoutError)
+                || (reply->error() == QNetworkReply::OperationCanceledError && httpStatus <= 0);
 
-        if (looksLike429) {
-            bool raOk = false;
-            const int raSec = reply->rawHeader(QByteArrayLiteral("Retry-After")).toInt(&raOk);
+            if (looksLike429) {
+                bool raOk = false;
+                const int raSec = reply->rawHeader(QByteArrayLiteral("Retry-After")).toInt(&raOk);
+                reply->deleteLater();
+                if (attempt + 1 < kMaxNumverifyAttempts) {
+                    int backoffMs = 2000 * (1 << attempt);
+                    if (raOk && raSec > 0)
+                        backoffMs = qMax(backoffMs, raSec * 1000);
+                    QThread::msleep(static_cast<unsigned long>(qMin(backoffMs, 30000)));
+                    continue;
+                }
+                if (errorMessage) {
+                    *errorMessage = numverifyRedactSecrets(
+                        QStringLiteral("Quota / limite de debit Numverify (HTTP 429). Augmentez "
+                                       "NUMVERIFY_MIN_INTERVAL_MS (ms) ou attendez. Dernier message : %1")
+                            .arg(errStr));
+                }
+                return false;
+            }
+
+            if (looksLikeTemporaryNetworkIssue) {
+                reply->deleteLater();
+                if (attempt + 1 < kMaxNumverifyAttempts) {
+                    const int backoffMs = qMin(1500 * (attempt + 1), 8000);
+                    QThread::msleep(static_cast<unsigned long>(backoffMs));
+                    continue;
+                }
+                if (errorMessage) {
+                    *errorMessage = QStringLiteral(
+                        "Operation annulee/timeout Numverify apres plusieurs tentatives (reseau lent ou surcharge API).");
+                }
+                return false;
+            }
+
+            const bool looksLikeAuthIssue = (httpStatus == 401)
+                                            || errStr.contains(QStringLiteral("authentication"),
+                                                               Qt::CaseInsensitive)
+                                            || errStr.contains(QStringLiteral("unauthorized"), Qt::CaseInsensitive);
+            if (reply->error() != QNetworkReply::NoError) {
+                if (looksLikeAuthIssue) {
+                    reply->deleteLater();
+                    break; // bascule automatique vers l'autre endpoint/mode d'auth
+                }
+                if (errorMessage) {
+                    *errorMessage = numverifyRedactSecrets(
+                        QStringLiteral("%1 (HTTP %2)")
+                            .arg(errStr)
+                            .arg(httpStatus > 0 ? QString::number(httpStatus) : QStringLiteral("-")));
+                }
+                reply->deleteLater();
+                return false;
+            }
+
+            const QJsonDocument doc = QJsonDocument::fromJson(payload);
+            if (!doc.isObject()) {
+                if (errorMessage) {
+                    const QString snippet = QString::fromUtf8(payload.left(160));
+                    *errorMessage = numverifyRedactSecrets(
+                        QStringLiteral("Reponse Numverify invalide (pas JSON). HTTP %1\n%2")
+                            .arg(httpStatus > 0 ? QString::number(httpStatus) : QStringLiteral("-"), snippet));
+                }
+                reply->deleteLater();
+                return false;
+            }
+
+            const QJsonObject obj = doc.object();
+            if (obj.value(QStringLiteral("success")).isBool() && !obj.value(QStringLiteral("success")).toBool()) {
+                const QJsonObject errObj = obj.value(QStringLiteral("error")).toObject();
+                const int errCode = errObj.value(QStringLiteral("code")).toInt();
+                const QString errType = errObj.value(QStringLiteral("type")).toString();
+                const QString errInfo = errObj.value(QStringLiteral("info")).toString();
+                const bool apiAuthError = (errCode == 101) || (errCode == 104)
+                                          || errType.contains(QStringLiteral("auth"), Qt::CaseInsensitive);
+                if (apiAuthError) {
+                    reply->deleteLater();
+                    break; // essaie l'autre mode d'auth automatiquement
+                }
+                if (errorMessage) {
+                    *errorMessage = numverifyRedactSecrets(
+                        QStringLiteral("API Numverify: code %1 | %2 | %3").arg(errCode).arg(errType).arg(errInfo));
+                }
+                reply->deleteLater();
+                return false;
+            }
+
+            if (isValid)
+                *isValid = obj.value(QStringLiteral("valid")).toBool(false);
             reply->deleteLater();
-            if (attempt + 1 < kMaxNumverifyAttempts) {
-                int backoffMs = 2000 * (1 << attempt);
-                if (raOk && raSec > 0)
-                    backoffMs = qMax(backoffMs, raSec * 1000);
-                QThread::msleep(static_cast<unsigned long>(qMin(backoffMs, 30000)));
-                continue;
-            }
-            if (errorMessage) {
-                *errorMessage = numverifyRedactSecrets(
-                    QStringLiteral("Quota / limite de debit Numverify (HTTP 429). Augmentez "
-                                   "NUMVERIFY_MIN_INTERVAL_MS (ms) ou attendez. Dernier message : %1")
-                        .arg(errStr));
-            }
-            return false;
+            return true;
         }
-
-        if (reply->error() != QNetworkReply::NoError) {
-            if (errorMessage) {
-                *errorMessage = numverifyRedactSecrets(
-                    QStringLiteral("%1 (HTTP %2)")
-                        .arg(errStr)
-                        .arg(httpStatus > 0 ? QString::number(httpStatus) : QStringLiteral("-")));
-            }
-            reply->deleteLater();
-            return false;
-        }
-
-        const QJsonDocument doc = QJsonDocument::fromJson(payload);
-        if (!doc.isObject()) {
-            if (errorMessage) {
-                const QString snippet = QString::fromUtf8(payload.left(160));
-                *errorMessage = numverifyRedactSecrets(
-                    QStringLiteral("Reponse Numverify invalide (pas JSON). HTTP %1\n%2")
-                        .arg(httpStatus > 0 ? QString::number(httpStatus) : QStringLiteral("-"), snippet));
-            }
-            reply->deleteLater();
-            return false;
-        }
-
-        const QJsonObject obj = doc.object();
-        if (obj.value(QStringLiteral("success")).isBool() && !obj.value(QStringLiteral("success")).toBool()) {
-            const QJsonObject errObj = obj.value(QStringLiteral("error")).toObject();
-            const int errCode = errObj.value(QStringLiteral("code")).toInt();
-            const QString errType = errObj.value(QStringLiteral("type")).toString();
-            const QString errInfo = errObj.value(QStringLiteral("info")).toString();
-            if (errorMessage) {
-                *errorMessage = numverifyRedactSecrets(
-                    QStringLiteral("API Numverify: code %1 | %2 | %3").arg(errCode).arg(errType).arg(errInfo));
-            }
-            reply->deleteLater();
-            return false;
-        }
-
-        if (isValid)
-            *isValid = obj.value(QStringLiteral("valid")).toBool(false);
-        reply->deleteLater();
-        return true;
     }
 
     if (errorMessage)
-        *errorMessage = QStringLiteral("Numverify: echec inattendu apres plusieurs tentatives.");
+        *errorMessage = QStringLiteral(
+            "Authentification Numverify echouee (HTTP 401). Verifiez NUMVERIFY_API_KEY/NUMVERIFY_KEY.");
     return false;
 }
 
 void MainWindow::applyClientScoringResults(const QHash<int, int> &scoresByClientId,
-                                           const QHash<int, QString> &statusByClientId)
+                                           const QHash<int, QString> &statusByClientId,
+                                           const QHash<int, double> &creditUsedByClientId)
 {
     if (!ui->clientTable)
         return;
 
     // Couleur de fond de toute la ligne selon STATUS (legendes identiques aux tooltips des colonnes).
     const auto statusColor = [](const QString &status) {
+        if (status == QStringLiteral("Elite"))
+            return QColor(QStringLiteral("#c4b5fd"));
         if (status == QStringLiteral("VIP"))
             return QColor(QStringLiteral("#d8b4fe"));
         if (status == QStringLiteral("Active"))
             return QColor(QStringLiteral("#bbf7d0"));
+        if (status == QStringLiteral("Promising"))
+            return QColor(QStringLiteral("#bfdbfe"));
         if (status == QStringLiteral("Medium"))
             return QColor(QStringLiteral("#fef08a"));
+        if (status == QStringLiteral("At Risk"))
+            return QColor(QStringLiteral("#fed7aa"));
         if (status == QStringLiteral("Inactive"))
             return QColor(QStringLiteral("#fecaca"));
         return QColor(QStringLiteral("#e5e7eb"));
@@ -5020,9 +5790,12 @@ void MainWindow::applyClientScoringResults(const QHash<int, int> &scoresByClient
             ui->clientTable->setItem(row, 10, new QTableWidgetItem());
         if (!ui->clientTable->item(row, 11))
             ui->clientTable->setItem(row, 11, new QTableWidgetItem());
+        if (!ui->clientTable->item(row, 12))
+            ui->clientTable->setItem(row, 12, new QTableWidgetItem());
 
         ui->clientTable->item(row, 10)->setText(QString::number(score));
         ui->clientTable->item(row, 11)->setText(status);
+        ui->clientTable->item(row, 12)->setText(QString::number(creditUsedByClientId.value(clientId, 0.0), 'f', 2));
 
         const QColor bg = statusColor(status);
         for (int col = 0; col < ui->clientTable->columnCount(); ++col) {
@@ -5051,49 +5824,163 @@ void MainWindow::onAnalyzeClientsClicked()
 
     QHash<int, int> scoresByClientId;
     QHash<int, QString> statusByClientId;
+    QHash<int, double> creditUsedByClientId;
+    QHash<QString, bool> phoneValidationCache;
     int phoneApiFailures = 0;
+    int phoneFormatIssues = 0;
+    int phoneApiCalls = 0;
+    int phoneCacheHits = 0;
+    int phoneValidCount = 0;
+    int blockedCount = 0;
+    int withPaymentCount = 0;
+    int noPaymentCount = 0;
+    double totalCreditUsed = 0.0;
     QStringList phoneFailureSamples;
+    bool cancelledByUser = false;
 
-    for (const ClientScoringRow &row : rows) {
-        const bool blocked = row.statutClient.contains(QStringLiteral("block"), Qt::CaseInsensitive);
+    QProgressDialog progress(QStringLiteral("Analyse des clients en cours..."),
+                             QStringLiteral("Annuler"), 0, rows.size(), this);
+    progress.setWindowTitle(QStringLiteral("Client Scoring System"));
+    progress.setWindowModality(Qt::ApplicationModal);
+    progress.setMinimumDuration(0);
+    progress.setValue(0);
+
+    for (int i = 0; i < rows.size(); ++i) {
+        const ClientScoringRow &row = rows.at(i);
+        progress.setLabelText(QStringLiteral("Analyse du client ID %1 (%2/%3)...")
+                                  .arg(row.id)
+                                  .arg(i + 1)
+                                  .arg(rows.size()));
+        progress.setValue(i);
+        QCoreApplication::processEvents();
+        if (progress.wasCanceled()) {
+            cancelledByUser = true;
+            break;
+        }
+
+        const bool blocked = isClientBlockedStatus(row.statutClient);
+        if (blocked)
+            blockedCount++;
+        if (row.lastPurchaseDate.isValid())
+            withPaymentCount++;
+        else
+            noPaymentCount++;
+
         bool phoneValid = false;
         if (!blocked) {
-            QString apiErr;
-            if (!isNumverifyPhoneValid(row.phone, &phoneValid, &apiErr)) {
-                phoneApiFailures++;
-                qDebug().noquote() << QStringLiteral("[Numverify] client %1 tel=%2 err=%3")
-                                           .arg(row.id)
-                                           .arg(row.phone)
-                                           .arg(apiErr);
-                if (phoneFailureSamples.size() < 5 && !apiErr.isEmpty()) {
-                    const QString line = QStringLiteral("ID %1, tel %2 : %3")
+            const QString normalizedPhone = normalizePhoneForNumverify(row.phone);
+            if (normalizedPhone.isEmpty()) {
+                phoneFormatIssues++;
+            } else if (phoneValidationCache.contains(normalizedPhone)) {
+                phoneValid = phoneValidationCache.value(normalizedPhone);
+                phoneCacheHits++;
+            } else {
+                QString apiErr;
+                phoneApiCalls++;
+                if (!isNumverifyPhoneValid(row.phone, &phoneValid, &apiErr)) {
+                    phoneApiFailures++;
+                    qDebug().noquote() << QStringLiteral("[Numverify] client %1 tel=%2 err=%3")
                                                .arg(row.id)
                                                .arg(row.phone)
                                                .arg(apiErr);
-                    if (!phoneFailureSamples.contains(line))
-                        phoneFailureSamples.append(line);
+                    if (phoneFailureSamples.size() < 5 && !apiErr.isEmpty()) {
+                        const QString line = QStringLiteral("ID %1, tel %2 : %3")
+                                                   .arg(row.id)
+                                                   .arg(row.phone)
+                                                   .arg(apiErr);
+                        if (!phoneFailureSamples.contains(line))
+                            phoneFailureSamples.append(line);
+                    }
                 }
+                phoneValidationCache.insert(normalizedPhone, phoneValid);
             }
         }
+        if (phoneValid)
+            phoneValidCount++;
 
-        const int score = computeClientScoreValue(row.lastPurchaseDate, phoneValid, blocked);
+        const int score = computeClientScoreValue(row, phoneValid, blocked);
         const QString status = computeClientStatusLabel(score, blocked);
+        const double creditUsed = computeCreditUsedForClient(row.limiteCredit, score, status);
         scoresByClientId.insert(row.id, score);
         statusByClientId.insert(row.id, status);
+        creditUsedByClientId.insert(row.id, creditUsed);
+        totalCreditUsed += creditUsed;
+
+        QSqlQuery updateClientMetrics;
+        updateClientMetrics.prepare(QStringLiteral(
+            "UPDATE CLIENT "
+            "SET SCORE_CLIENT=:score, SOLDE_CREDIT_UTILISE=:creditUsed "
+            "WHERE ID=:id"));
+        updateClientMetrics.bindValue(QStringLiteral(":score"), score);
+        updateClientMetrics.bindValue(QStringLiteral(":creditUsed"), creditUsed);
+        updateClientMetrics.bindValue(QStringLiteral(":id"), row.id);
+        if (!updateClientMetrics.exec()) {
+            qDebug().noquote() << QStringLiteral("[ClientScoring] Update CLIENT impossible pour ID %1: %2")
+                                      .arg(row.id)
+                                      .arg(updateClientMetrics.lastError().text());
+        }
+    }
+    progress.setValue(rows.size());
+
+    applyClientScoringResults(scoresByClientId, statusByClientId, creditUsedByClientId);
+
+    const auto itemLine = [](const QString &label, const QString &value) {
+        return QStringLiteral("<li><b>%1</b> %2</li>").arg(label.toHtmlEscaped(), value.toHtmlEscaped());
+    };
+    QString html = QStringLiteral("<div style='font-family:Segoe UI, Arial; font-size:10pt; line-height:1.35;'>");
+    html += QStringLiteral("<h3 style='margin:0 0 8px 0; color:#7a4b2f;'>Fiche d'analyse client</h3>");
+    if (cancelledByUser) {
+        html += QStringLiteral(
+            "<p style='margin:0 0 10px 0; color:#9a3412;'><b>Analyse interrompue par l'utilisateur.</b><br/>"
+            "Les resultats affiches sont partiels.</p>");
+    } else {
+        html += QStringLiteral("<p style='margin:0 0 10px 0; color:#14532d;'><b>Analyse terminee avec succes.</b></p>");
     }
 
-    applyClientScoringResults(scoresByClientId, statusByClientId);
+    html += QStringLiteral("<p style='margin:8px 0 4px 0;'><b>Synthese executive</b></p><ul style='margin:0 0 8px 18px;'>");
+    html += itemLine(QStringLiteral("Clients analyses :"), QString::number(rows.size()));
+    html += itemLine(QStringLiteral("Clients bloques :"), QString::number(blockedCount));
+    html += QStringLiteral("</ul>");
 
-    QString info = QStringLiteral("Analyse terminee pour %1 clients.").arg(rows.size());
+    html += QStringLiteral("<p style='margin:8px 0 4px 0;'><b>Qualite des donnees commerciales</b></p><ul style='margin:0 0 8px 18px;'>");
+    html += itemLine(QStringLiteral("Paiements trouves :"), QString::number(withPaymentCount));
+    html += itemLine(QStringLiteral("Sans historique de paiement :"), QString::number(noPaymentCount));
+    html += itemLine(QStringLiteral("Exposition credit estimee (total) :"), QString::number(totalCreditUsed, 'f', 2));
+    html += QStringLiteral("</ul>");
+
+    html += QStringLiteral("<p style='margin:8px 0 4px 0;'><b>Verification telephonique (Numverify)</b></p><ul style='margin:0 0 8px 18px;'>");
+    html += itemLine(QStringLiteral("Numeros valides :"), QString::number(phoneValidCount));
+    html += itemLine(QStringLiteral("Appels API effectues :"), QString::number(phoneApiCalls));
+    html += itemLine(QStringLiteral("Reutilisation du cache :"), QString::number(phoneCacheHits));
+    if (phoneFormatIssues > 0)
+        html += itemLine(QStringLiteral("Numeros ignores (format invalide) :"), QString::number(phoneFormatIssues));
+    html += QStringLiteral("</ul>");
+
     if (phoneApiFailures > 0) {
-        info += QStringLiteral(
-                    "\n%1 appels Numverify ont echoue (format international, reseau, ou quota / cle API). "
-                    "Les numeros courts sont envoyes comme +216...")
-                    .arg(phoneApiFailures);
-        if (!phoneFailureSamples.isEmpty())
-            info += QStringLiteral("\n\nDetail (echantillon):\n%1").arg(phoneFailureSamples.join(QStringLiteral("\n")));
+        html += QStringLiteral("<p style='margin:8px 0 4px 0;'><b>Alertes</b></p><ul style='margin:0 0 8px 18px;'>");
+        html += itemLine(QStringLiteral("Echecs Numverify :"), QString::number(phoneApiFailures));
+        html += QStringLiteral("<li>Causes possibles : format international, latence reseau, quota ou authentification API.</li>");
+        html += QStringLiteral("<li>Normalisation appliquee : numeros courts envoyes en <b>+216...</b>.</li>");
+        html += QStringLiteral("</ul>");
+        if (!phoneFailureSamples.isEmpty()) {
+            html += QStringLiteral("<p style='margin:8px 0 4px 0;'><b>Exemples d'incidents</b></p><ul style='margin:0 0 8px 18px;'>");
+            for (const QString &sample : phoneFailureSamples)
+                html += QStringLiteral("<li>%1</li>").arg(sample.toHtmlEscaped());
+            html += QStringLiteral("</ul>");
+        }
+        html += QStringLiteral("<p style='margin:8px 0 0 0;'><b>Action recommandee :</b> verifier la connectivite internet puis relancer l'analyse.</p>");
+    } else {
+        html += QStringLiteral("<p style='margin:8px 0 0 0;'><b>Conclusion :</b> aucune anomalie technique detectee sur la verification Numverify.</p>");
     }
-    QMessageBox::information(this, QStringLiteral("Client Scoring System"), info);
+    html += QStringLiteral("</div>");
+
+    QMessageBox report(this);
+    report.setIcon(QMessageBox::Information);
+    report.setWindowTitle(QStringLiteral("Client Scoring System - Fiche Professionnelle"));
+    report.setTextFormat(Qt::RichText);
+    report.setText(html);
+    report.setStandardButtons(QMessageBox::Ok);
+    report.exec();
 }
 
 ClientData MainWindow::currentClientSnapshotFromForm() const
@@ -5313,10 +6200,20 @@ bool MainWindow::validateClientFormInputs(bool isUpdate)
     }
 
     const QString limiteText = ui->lineEdit_limiteCreditSeg->text().trimmed();
-    if (limiteText.isEmpty()) {
-        errors << QStringLiteral("- Limite credit requise.");
-        if (!firstInvalid) firstInvalid = ui->lineEdit_limiteCreditSeg;
-    } else {
+    const bool isLimiteCreditVisible = ui->lineEdit_limiteCreditSeg->isVisible();
+    if (isLimiteCreditVisible) {
+        if (limiteText.isEmpty()) {
+            errors << QStringLiteral("- Limite credit requise.");
+            if (!firstInvalid) firstInvalid = ui->lineEdit_limiteCreditSeg;
+        } else {
+            bool limiteOk = false;
+            const double limite = limiteText.toDouble(&limiteOk);
+            if (!limiteOk || limite < 0.0) {
+                errors << QStringLiteral("- Limite credit invalide (nombre >= 0).");
+                if (!firstInvalid) firstInvalid = ui->lineEdit_limiteCreditSeg;
+            }
+        }
+    } else if (!limiteText.isEmpty()) {
         bool limiteOk = false;
         const double limite = limiteText.toDouble(&limiteOk);
         if (!limiteOk || limite < 0.0) {
@@ -5976,6 +6873,169 @@ void MainWindow::onClientWhatsAppClicked()
     m_whatsappBusinessService->sendTextMessage(toDigits, body, previewUrl);
 }
 
+void MainWindow::onProduitSendAlertClicked()
+{
+    if (!m_whatsappBusinessService) {
+        QMessageBox::warning(this, QStringLiteral("Alerte produit"), QStringLiteral("Service WhatsApp indisponible."));
+        return;
+    }
+
+    QString cfgHint;
+    if (!WhatsAppBusinessService::isConfigured(&cfgHint)) {
+        QMessageBox::information(this, QStringLiteral("Alerte produit (WhatsApp)"),
+                                 QStringLiteral("Configuration Twilio absente.\n\n%1").arg(cfgHint));
+        return;
+    }
+
+    if (!ui->employeeTable_4 || ui->employeeTable_4->rowCount() == 0) {
+        QMessageBox::information(this, QStringLiteral("Alerte produit"), QStringLiteral("Aucun produit disponible."));
+        return;
+    }
+
+    int row = ui->employeeTable_4->currentRow();
+    if (row < 0) {
+        const auto ranges = ui->employeeTable_4->selectedRanges();
+        if (!ranges.isEmpty())
+            row = ranges.first().topRow();
+    }
+    if (row < 0) {
+        QMessageBox::information(this, QStringLiteral("Alerte produit"),
+                                 QStringLiteral("Selectionnez d'abord une ligne produit."));
+        return;
+    }
+
+    const auto cellText = [this, row](int col) -> QString {
+        if (!ui->employeeTable_4)
+            return {};
+        if (QTableWidgetItem *it = ui->employeeTable_4->item(row, col))
+            return it->text().trimmed();
+        return {};
+    };
+
+    const QString produitId = cellText(0);
+    const QString nomProduit = cellText(1);
+    const QString categorie = cellText(2);
+    const QString qteStock = cellText(5);
+    const QString etat = cellText(6);
+
+    if (nomProduit.isEmpty()) {
+        QMessageBox::information(this, QStringLiteral("Alerte produit"),
+                                 QStringLiteral("Produit invalide sur la ligne selectionnee."));
+        return;
+    }
+
+    const QString prefix = QString::fromUtf8(qgetenv("LEATHER_PHONE_PREFIX")).trimmed();
+    const QString defaultPhone = QString::fromUtf8(qgetenv("LEATHER_ALERT_WHATSAPP_TO")).trimmed();
+    bool okPhone = false;
+    const QString rawPhone = QInputDialog::getText(this,
+                                                   QStringLiteral("Alerte produit"),
+                                                   QStringLiteral("Numero WhatsApp destinataire (+216...):"),
+                                                   QLineEdit::Normal,
+                                                   defaultPhone,
+                                                   &okPhone)
+                                 .trimmed();
+    if (!okPhone || rawPhone.isEmpty())
+        return;
+
+    const QString e164 = ClientNotificationService::normalizePhoneE164(rawPhone, prefix);
+    if (e164.isEmpty() || !e164.startsWith(QLatin1Char('+'))) {
+        QMessageBox::warning(this,
+                             QStringLiteral("Alerte produit"),
+                             QStringLiteral("Numero invalide. Entrez un numero international (+216...) "
+                                            "ou configurez LEATHER_PHONE_PREFIX."));
+        return;
+    }
+    QString toDigits = e164;
+    toDigits.remove(0, 1);
+    m_lastWhatsAppDestinationDisplay = e164;
+
+    const int stockCritique = qMax(0, qEnvironmentVariableIntValue("LEATHER_STOCK_CRITIQUE"));
+    int stockFaible = qEnvironmentVariableIntValue("LEATHER_STOCK_FAIBLE");
+    if (stockFaible <= 0)
+        stockFaible = 10;
+    if (stockFaible < stockCritique)
+        stockFaible = stockCritique;
+
+    bool stockOk = false;
+    const int stockValue = qteStock.toInt(&stockOk);
+    const QString etatNorm = etat.trimmed().toLower();
+    const bool isInactive = etatNorm.contains(QStringLiteral("inactif"));
+
+    QString niveau;
+    QString action;
+    if (isInactive) {
+        niveau = QStringLiteral("Inactif");
+        action = QStringLiteral("Confirmer si la vente du produit est arretee.");
+    } else if (!stockOk) {
+        niveau = QStringLiteral("Indetermine");
+        action = QStringLiteral("Verifier la valeur de stock dans la fiche produit.");
+    } else if (stockValue <= 0) {
+        niveau = QStringLiteral("Rupture");
+        action = QStringLiteral("Action urgente: lancer une commande fournisseur immediatement.");
+    } else if (stockValue <= stockCritique) {
+        niveau = QStringLiteral("Critique");
+        action = QStringLiteral("Action prioritaire: reapprovisionner aujourd'hui.");
+    } else if (stockValue <= stockFaible) {
+        niveau = QStringLiteral("Faible");
+        action = QStringLiteral("Planifier un reapprovisionnement rapidement.");
+    } else {
+        niveau = QStringLiteral("Normal");
+        action = QStringLiteral("Stock correct, suivi standard.");
+    }
+
+    const QString produitIdSafe = produitId.isEmpty() ? QStringLiteral("N/A") : produitId;
+    const QString categorieSafe = categorie.isEmpty() ? QStringLiteral("N/A") : categorie;
+    const QString qteStockSafe = qteStock.isEmpty() ? QStringLiteral("N/A") : qteStock;
+    const QString etatSafe = etat.isEmpty() ? QStringLiteral("N/A") : etat;
+
+    QString body;
+    const QString templateRaw = QString::fromUtf8(qgetenv("LEATHER_ALERT_TEMPLATE")).trimmed();
+    if (!templateRaw.isEmpty()) {
+        body = templateRaw;
+        body.replace(QStringLiteral("{nom}"), nomProduit);
+        body.replace(QStringLiteral("{id}"), produitIdSafe);
+        body.replace(QStringLiteral("{categorie}"), categorieSafe);
+        body.replace(QStringLiteral("{stock}"), qteStockSafe);
+        body.replace(QStringLiteral("{etat}"), etatSafe);
+        body.replace(QStringLiteral("{niveau}"), niveau);
+        body.replace(QStringLiteral("{action}"), action);
+        body.replace(QStringLiteral("{seuil_critique}"), QString::number(stockCritique));
+        body.replace(QStringLiteral("{seuil_faible}"), QString::number(stockFaible));
+    } else {
+        body = QStringLiteral(
+                   "Alerte stock Leather House (%1)\n"
+                   "Produit: %2\n"
+                   "ID: %3\n"
+                   "Categorie: %4\n"
+                   "Stock actuel: %5\n"
+                   "Etat: %6\n"
+                   "Action: %7\n"
+                   "Seuils configures: critique<=%8, faible<=%9")
+                   .arg(niveau,
+                        nomProduit,
+                        produitIdSafe,
+                        categorieSafe,
+                        qteStockSafe,
+                        etatSafe,
+                        action,
+                        QString::number(stockCritique),
+                        QString::number(stockFaible));
+    }
+
+    if (QMessageBox::question(this,
+                              QStringLiteral("Confirmation"),
+                              QStringLiteral("Envoyer cette alerte produit au %1 ?\n\n%2")
+                                  .arg(e164,
+                                       body.size() > 350 ? body.left(350) + QStringLiteral("...") : body),
+                              QMessageBox::Yes | QMessageBox::No,
+                              QMessageBox::No)
+        != QMessageBox::Yes) {
+        return;
+    }
+
+    m_whatsappBusinessService->sendTextMessage(toDigits, body, true);
+}
+
 void MainWindow::updateAiInsightsPanel(const ClientData &client)
 {
     Q_UNUSED(client)
@@ -6137,11 +7197,13 @@ void MainWindow::installProduitsPageResponsiveLayout()
         dlg->activateWindow();
     });
 
-    auto *btnAlerteTop = new QPushButton(QStringLiteral("Alerte"), topActionsCard);
-    btnAlerteTop->setCursor(Qt::PointingHandCursor);
-    btnAlerteTop->setStyleSheet(btnStyle);
-    btnAlerteTop->setIcon(style()->standardIcon(QStyle::SP_MessageBoxWarning));
-    connect(btnAlerteTop, &QPushButton::clicked, this, &MainWindow::sendStockAlert);
+    auto *btnSendProduitAlert = new QPushButton(QStringLiteral("Send alerte"), topActionsCard);
+    btnSendProduitAlert->setCursor(Qt::PointingHandCursor);
+    btnSendProduitAlert->setStyleSheet(btnStyle);
+    btnSendProduitAlert->setIcon(style()->standardIcon(QStyle::SP_MessageBoxWarning));
+    btnSendProduitAlert->setToolTip(QStringLiteral(
+        "Envoyer une alerte produit par WhatsApp (choix du type de message)."));
+    connect(btnSendProduitAlert, &QPushButton::clicked, this, &MainWindow::onProduitSendAlertClicked);
 
     auto *searchTop = new QLineEdit(topActionsCard);
     searchTop->setMinimumHeight(34);
@@ -6194,7 +7256,7 @@ void MainWindow::installProduitsPageResponsiveLayout()
 
     topLay->addWidget(btnExportExcel);
     topLay->addWidget(btnCatalogueTop);
-    topLay->addWidget(btnAlerteTop);
+    topLay->addWidget(btnSendProduitAlert);
     topLay->addStretch(1);
     topLay->addWidget(filterTop);
     topLay->addWidget(searchTop, 1);
@@ -6331,7 +7393,11 @@ void MainWindow::setupProduitPage()
             formLay->addRow(new QLabel(QStringLiteral("Nom produit"), formWrap), ui->lineEditCIN_4);
             formLay->addRow(new QLabel(QStringLiteral("Categorie"), formWrap), ui->lineEditNom_4);
             formLay->addRow(new QLabel(QStringLiteral("Type cuir"), formWrap), ui->lineEditPrenom_4);
-            formLay->addRow(new QLabel(QStringLiteral("Qualite"), formWrap), ui->comboBox_3);
+            if (!m_produitNumeroEdit) {
+                m_produitNumeroEdit = new QLineEdit(formWrap);
+                m_produitNumeroEdit->setObjectName(QStringLiteral("lineEditProduitNumero"));
+            }
+            formLay->addRow(new QLabel(QStringLiteral("Numero telephone"), formWrap), m_produitNumeroEdit);
             formLay->addRow(new QLabel(QStringLiteral("Qt stock"), formWrap), ui->lineEditAdresse_2);
             formLay->addRow(new QLabel(QStringLiteral("Etat"), formWrap), ui->comboBox_4);
             formLay->addRow(new QLabel(QStringLiteral("Date fab."), formWrap), ui->dateTimeEdit);
@@ -6354,7 +7420,7 @@ void MainWindow::setupProduitPage()
                 static_cast<QWidget *>(ui->lineEditCIN_4),
                 static_cast<QWidget *>(ui->lineEditNom_4),
                 static_cast<QWidget *>(ui->lineEditPrenom_4),
-                static_cast<QWidget *>(ui->comboBox_3),
+                static_cast<QWidget *>(m_produitNumeroEdit),
                 static_cast<QWidget *>(ui->lineEditAdresse_2),
                 static_cast<QWidget *>(ui->comboBox_4),
                 static_cast<QWidget *>(ui->dateTimeEdit),
@@ -6516,7 +7582,7 @@ void MainWindow::setupProduitPage()
             QStringLiteral("Nom produit"),
             QStringLiteral("Categorie"),
             QStringLiteral("Type cuir"),
-            QStringLiteral("Qualite"),
+            QStringLiteral("Numero telephone"),
             QStringLiteral("Qt stock"),
             QStringLiteral("Etat"),
             QStringLiteral("Date fab."),
@@ -6526,8 +7592,12 @@ void MainWindow::setupProduitPage()
             QStringLiteral("SUPPR."),
             QStringLiteral("MODIF."),
         });
-        ui->employeeTable_4->horizontalHeader()->setStretchLastSection(true);
-        ui->employeeTable_4->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+        ui->employeeTable_4->horizontalHeader()->setStretchLastSection(false);
+        ui->employeeTable_4->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
+        ui->employeeTable_4->horizontalHeader()->setMinimumSectionSize(90);
+        ui->employeeTable_4->horizontalHeader()->setDefaultSectionSize(130);
+        ui->employeeTable_4->setColumnWidth(4, 120);
+        ui->employeeTable_4->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
         ui->employeeTable_4->setSelectionBehavior(QAbstractItemView::SelectRows);
         ui->employeeTable_4->setSelectionMode(QAbstractItemView::SingleSelection);
         ui->employeeTable_4->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -6560,13 +7630,15 @@ void MainWindow::setupProduitPage()
         prepLineEdit(ui->lineEditCIN_4, QStringLiteral("Entrez nom produit"));
         prepLineEdit(ui->lineEditNom_4, QStringLiteral("Selectionnez categorie"));
         prepLineEdit(ui->lineEditPrenom_4, QStringLiteral("Selectionnez type de cuir"));
+        prepLineEdit(m_produitNumeroEdit, QStringLiteral("Entrez le numero de telephone"));
         prepLineEdit(ui->lineEditAdresse_2, QStringLiteral("Quantite en stock (entier)"));
         prepLineEdit(ui->lineEditPrenom_5, QStringLiteral("Entrez le style"));
 
-        if (ui->comboBox_3) {
-            ui->comboBox_3->setEnabled(true);
-            ui->comboBox_3->setFocusPolicy(Qt::StrongFocus);
-            ui->comboBox_3->setPlaceholderText(QStringLiteral("Selectionnez qualite"));
+        if (ui->comboBox_3)
+            ui->comboBox_3->hide();
+        if (m_produitNumeroEdit) {
+            m_produitNumeroEdit->setValidator(
+                new QRegularExpressionValidator(QRegularExpression(QStringLiteral("^\\+?[0-9 ]{0,15}$")), this));
         }
         if (ui->comboBox_4) {
             ui->comboBox_4->setEnabled(true);
@@ -6661,7 +7733,7 @@ void MainWindow::setupProduitPage()
 
         if (ui->textEdit) {
             ui->textEdit->setReadOnly(true);
-            ui->textEdit->setPlaceholderText(QStringLiteral("Alertes stock faible, produits inactifs, mentions defauts…"));
+            ui->textEdit->setPlaceholderText(QStringLiteral("Informations de production."));
         }
 
         // Actions rapides visibles dans la barre Produits.
@@ -6915,159 +7987,6 @@ void MainWindow::loadPrediction()
     });
 }
 
-void MainWindow::sendStockAlert()
-{
-    if (!m_networkAccessManager) {
-        qDebug() << "[API][Alerte] QNetworkAccessManager indisponible.";
-        QMessageBox::warning(this, QStringLiteral("Alerte stock"), QStringLiteral("Service réseau indisponible."));
-        return;
-    }
-
-
-    const QUrl url(leatherStockApiBaseUrl() + QStringLiteral("/stock/faible"));
-    QNetworkReply *reply = m_networkAccessManager->get(QNetworkRequest(url));
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-        const QByteArray payload = reply->readAll();
-        qDebug().noquote() << "[API][Alerte] Réponse /stock/faible:\n" << QString::fromUtf8(payload);
-
-        if (reply->error() != QNetworkReply::NoError) {
-            qDebug() << "[API][Alerte] Erreur réseau:" << reply->errorString();
-            QMessageBox::warning(this, QStringLiteral("Alerte stock"),
-                                 QStringLiteral("Erreur réseau : %1\n\nVérifie que l'API stock est démarrée (%2).")
-                                     .arg(reply->errorString(), leatherStockApiBaseUrl()));
-            reply->deleteLater();
-            return;
-        }
-
-        QJsonParseError parseError;
-        const QJsonDocument doc = QJsonDocument::fromJson(payload, &parseError);
-        if (parseError.error != QJsonParseError::NoError || !doc.isArray()) {
-            qDebug() << "[API][Alerte] JSON invalide:" << parseError.errorString();
-            QMessageBox::warning(this, QStringLiteral("Alerte stock"), QStringLiteral("Réponse API invalide."));
-            reply->deleteLater();
-            return;
-        }
-
-        const QJsonArray arr = doc.array();
-        if (arr.isEmpty()) {
-            QMessageBox::information(this, QStringLiteral("Alerte stock"), QStringLiteral("Stock OK"));
-            reply->deleteLater();
-            return;
-        }
-
-        QStringList lines;
-        for (const QJsonValue &v : arr) {
-            if (!v.isObject())
-                continue;
-            const QJsonObject o = v.toObject();
-            const QString nom = o.value(QStringLiteral("nom")).toString(
-                o.value(QStringLiteral("name")).toString(QStringLiteral("Produit")));
-            const int stock = o.value(QStringLiteral("stock")).toInt(o.value(QStringLiteral("quantite")).toInt(0));
-            lines << QStringLiteral("%1 - Stock %2").arg(nom).arg(stock);
-        }
-
-        QMessageBox::warning(this, QStringLiteral("Alerte stock"),
-                             QStringLiteral("Produits critiques :\n\n%1").arg(lines.join(QStringLiteral("\n"))));
-        reply->deleteLater();
-    });
-    return;
-
-    if (!ensureDbOpenForProduits()) {
-        QMessageBox::warning(this, QStringLiteral("Alerte stock"),
-                             QStringLiteral("Connexion base indisponible."));
-        return;
-    }
-
-    struct RuptureRow {
-        int id = 0;
-        QString nom;
-        int quantite = 0;
-    };
-    QVector<RuptureRow> ruptures;
-
-    const QString nomCol = CommerceStore::produitsLibelleColumnPhysical();
-    QSqlQuery q(db);
-    QString sql = QStringLiteral(
-        "SELECT ID, NVL(%1, 'Produit'), NVL(QUANTITE, 0) "
-        "FROM PRODUITS "
-        "WHERE NVL(QUANTITE, 0) = 0 "
-        "ORDER BY ID").arg(nomCol);
-
-    bool usingStockJoinFallback = false;
-    if (!q.exec(sql)) {
-        // Fallback schema courant: quantite dans STOCK.QTE_DISPONIBLE.
-        usingStockJoinFallback = true;
-        sql = QStringLiteral(
-            "SELECT P.ID, NVL(P.%1, 'Produit'), NVL(S.QTE_DISPONIBLE, 0) "
-            "FROM PRODUITS P "
-            "LEFT JOIN STOCK S ON S.ID_PRODUIT = P.ID "
-            "WHERE NVL(S.QTE_DISPONIBLE, 0) = 0 "
-            "ORDER BY P.ID").arg(nomCol);
-        if (!q.exec(sql)) {
-            QMessageBox::warning(this,
-                                 QStringLiteral("Alerte stock"),
-                                 QStringLiteral("Erreur SQL:\n%1").arg(q.lastError().text()));
-            return;
-        }
-    }
-
-    while (q.next()) {
-        RuptureRow row;
-        row.id = q.value(0).toInt();
-        row.nom = q.value(1).toString().trimmed();
-        row.quantite = q.value(2).toInt();
-        ruptures.push_back(row);
-    }
-
-    qDebug() << "[AlerteStock] Produits trouves en rupture:" << ruptures.size()
-             << "| fallback STOCK utilisé:" << usingStockJoinFallback;
-
-    if (ruptures.isEmpty()) {
-        QMessageBox::information(this,
-                                 QStringLiteral("Alerte stock"),
-                                 QStringLiteral("Aucun produit en rupture."));
-        return;
-    }
-
-    const QString subject = QStringLiteral("Alerte Stock Produits");
-
-    QStringList lines;
-    lines << QStringLiteral("Bonjour,")
-          << QString()
-          << QStringLiteral("Alerte : produits sans stock (quantité = 0)")
-          << QString();
-    for (const RuptureRow &r : ruptures) {
-        lines << QStringLiteral("- ID %1 : %2 (stock = %3)")
-                     .arg(QString::number(r.id), r.nom, QString::number(r.quantite));
-    }
-    lines << QString()
-          << QStringLiteral("Notification automatique.");
-    const QString body = lines.join(QStringLiteral("\n"));
-
-    qDebug().noquote() << "[AlerteStock] Contenu message:\n" << body;
-
-    QString to = QStringLiteral("jahhamoufida64@gmail.com");
-    if (to.isEmpty()) {
-        QMessageBox::warning(this,
-                             QStringLiteral("Alerte stock"),
-                             QStringLiteral("Destinataire e-mail manquant."));
-        return;
-    }
-    qDebug() << "[AlerteStock] Destinataire e-mail:" << to;
-
-    QString smtpErr;
-    if (!LeatherSmtp::sendEmail(to, subject, body, &smtpErr)) {
-        QMessageBox::warning(this,
-                             QStringLiteral("Alerte stock"),
-                             QStringLiteral("Échec envoi e-mail:\n%1").arg(smtpErr));
-        return;
-    }
-
-    QMessageBox::information(this,
-                             QStringLiteral("Alerte stock"),
-                             QStringLiteral("Email envoyé avec succès."));
-}
-
 void MainWindow::refreshProduitsTable()
 {
     if (!ui->employeeTable_4 || !db.isOpen())
@@ -7081,14 +8000,6 @@ void MainWindow::refreshProduitsTable()
         return;
     }
 
-    if (ui->textEdit) {
-        QString alertErr;
-        const QString alerts = Produit::defectAlertsPlainText(&alertErr);
-        ui->textEdit->setPlainText(alertErr.isEmpty()
-                                        ? alerts
-                                        : QStringLiteral("Erreur lecture alertes :\n%1").arg(alertErr));
-    }
-
     if (ui->lineEditSearch_5 && !ui->lineEditSearch_5->text().trimmed().isEmpty()) {
         const int mode = Produit::searchFilterModeFromComboText(
             ui->comboBox_6 ? ui->comboBox_6->currentText() : QString());
@@ -7097,9 +8008,20 @@ void MainWindow::refreshProduitsTable()
 
     if (ui->employeeTable_4->columnCount() < 13)
         ui->employeeTable_4->setColumnCount(13);
+    ui->employeeTable_4->setHorizontalHeaderItem(0, new QTableWidgetItem(QStringLiteral("ID")));
+    ui->employeeTable_4->setHorizontalHeaderItem(1, new QTableWidgetItem(QStringLiteral("Nom produit")));
+    ui->employeeTable_4->setHorizontalHeaderItem(2, new QTableWidgetItem(QStringLiteral("Categorie")));
+    ui->employeeTable_4->setHorizontalHeaderItem(3, new QTableWidgetItem(QStringLiteral("Type cuir")));
+    ui->employeeTable_4->setHorizontalHeaderItem(4, new QTableWidgetItem(QStringLiteral("Numero telephone")));
+    ui->employeeTable_4->setHorizontalHeaderItem(5, new QTableWidgetItem(QStringLiteral("Qt stock")));
+    ui->employeeTable_4->setHorizontalHeaderItem(6, new QTableWidgetItem(QStringLiteral("Etat")));
+    ui->employeeTable_4->setHorizontalHeaderItem(7, new QTableWidgetItem(QStringLiteral("Date fab.")));
+    ui->employeeTable_4->setHorizontalHeaderItem(8, new QTableWidgetItem(QStringLiteral("Type design")));
+    ui->employeeTable_4->setHorizontalHeaderItem(9, new QTableWidgetItem(QStringLiteral("Style (interne)")));
     ui->employeeTable_4->setHorizontalHeaderItem(10, new QTableWidgetItem(QStringLiteral("QR Code")));
     ui->employeeTable_4->setHorizontalHeaderItem(11, new QTableWidgetItem(QStringLiteral("SUPPR.")));
     ui->employeeTable_4->setHorizontalHeaderItem(12, new QTableWidgetItem(QStringLiteral("MODIF.")));
+    ui->employeeTable_4->setColumnWidth(4, 120);
     for (int row = 0; row < ui->employeeTable_4->rowCount(); ++row) {
         auto *deleteBtn = new QPushButton(QStringLiteral("♟"), ui->employeeTable_4);
         deleteBtn->setToolTip(QStringLiteral("Supprimer ce produit"));
@@ -7240,17 +8162,6 @@ void MainWindow::on_btnRechercher_4_clicked()
     }
 }
 
-void MainWindow::on_pushButton_6_clicked()
-{
-    if (!ui->textEdit)
-        return;
-    QString alertErr;
-    const QString alerts = Produit::defectAlertsPlainText(&alertErr);
-    ui->textEdit->setPlainText(alertErr.isEmpty()
-                                    ? alerts
-                                    : QStringLiteral("Erreur lecture alertes :\n%1").arg(alertErr));
-}
-
 ProduitEditorWidgets MainWindow::produitEditorBindings() const
 {
     ProduitEditorWidgets w;
@@ -7258,6 +8169,7 @@ ProduitEditorWidgets MainWindow::produitEditorBindings() const
     w.nomProduit = ui->lineEditCIN_4;
     w.categorie = ui->lineEditNom_4;
     w.typeCuir = ui->lineEditPrenom_4;
+    w.numeroTelephone = m_produitNumeroEdit;
     w.quantiteStock = ui->lineEditAdresse_2;
     w.style = ui->lineEditPrenom_5;
     w.qualite = ui->comboBox_3;
@@ -7426,13 +8338,15 @@ QString MainWindow::loadProduitQrPathFromDb(int produitId) const
 void MainWindow::setProduitQrPreview(const QString &qrPath)
 {
     m_lastProduitQrPath = qrPath.trimmed();
+    const bool hasSelectedProduit = m_produitSelectedId > 0
+        || (ui && ui->employeeTable_4 && ui->employeeTable_4->currentRow() >= 0);
     if (!m_produitQrLabel)
         return;
     if (m_lastProduitQrPath.isEmpty()) {
         m_produitQrLabel->setPixmap(QPixmap());
         m_produitQrLabel->setText(QStringLiteral("QR non genere"));
         if (m_produitVoirQrButton)
-            m_produitVoirQrButton->setEnabled(false);
+            m_produitVoirQrButton->setEnabled(hasSelectedProduit);
         return;
     }
     QPixmap px;
@@ -7450,7 +8364,7 @@ void MainWindow::setProduitQrPreview(const QString &qrPath)
         m_produitQrLabel->setPixmap(QPixmap());
         m_produitQrLabel->setText(QStringLiteral("QR introuvable"));
         if (m_produitVoirQrButton)
-            m_produitVoirQrButton->setEnabled(false);
+            m_produitVoirQrButton->setEnabled(hasSelectedProduit);
         return;
     }
     m_produitQrLabel->setText(QString());
@@ -7671,6 +8585,7 @@ void MainWindow::on_btnAjouter_6_clicked()
               nom,
               ui->lineEditNom_4 ? ui->lineEditNom_4->text().trimmed() : QString(),
               ui->lineEditPrenom_4 ? ui->lineEditPrenom_4->text().trimmed() : QString(),
+              m_produitNumeroEdit ? m_produitNumeroEdit->text().trimmed() : QString(),
               ui->comboBox_3 ? ui->comboBox_3->currentText() : QString(),
               qte,
               ui->comboBox_4 ? ui->comboBox_4->currentText() : QString(),
@@ -7773,6 +8688,7 @@ void MainWindow::on_btnModifier_4_clicked()
               nom,
               ui->lineEditNom_4 ? ui->lineEditNom_4->text().trimmed() : QString(),
               ui->lineEditPrenom_4 ? ui->lineEditPrenom_4->text().trimmed() : QString(),
+              m_produitNumeroEdit ? m_produitNumeroEdit->text().trimmed() : QString(),
               ui->comboBox_3 ? ui->comboBox_3->currentText() : QString(),
               qte,
               ui->comboBox_4 ? ui->comboBox_4->currentText() : QString(),
@@ -7930,10 +8846,11 @@ void MainWindow::installEmployesPageClientLikeLayout()
                 "QComboBox:focus { border-color: #c08a5b; }"));
             filterTop->addItem(QStringLiteral("Filtre: Tous"), -1);
             filterTop->addItem(QStringLiteral("CIN"), 0);
-            filterTop->addItem(QStringLiteral("Nom"), 1);
-            filterTop->addItem(QStringLiteral("Prenom"), 2);
-            filterTop->addItem(QStringLiteral("Poste"), 7);
-            filterTop->addItem(QStringLiteral("Email"), 9);
+            filterTop->addItem(QStringLiteral("ID Carte"), 1);
+            filterTop->addItem(QStringLiteral("Nom"), 2);
+            filterTop->addItem(QStringLiteral("Prenom"), 3);
+            filterTop->addItem(QStringLiteral("Poste"), 8);
+            filterTop->addItem(QStringLiteral("Email"), 10);
 
             btnReset->setCursor(Qt::PointingHandCursor);
             btnReset->setMinimumSize(116, 34);
@@ -7975,7 +8892,7 @@ void MainWindow::installEmployesPageClientLikeLayout()
         content->removeWidget(ui->employesRightPanel);
         ui->employesRightPanel->hide();
     }
-    content->setSpacing(14);
+    content->setSpacing(22);
 
     auto *leftCard = new QWidget(ui->pageEmployes);
     leftCard->setObjectName(QStringLiteral("clientFormCard"));
@@ -7990,7 +8907,7 @@ void MainWindow::installEmployesPageClientLikeLayout()
     rightZone->setObjectName(QStringLiteral("clientTableZone"));
     rightZone->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     auto *rightLay = new QVBoxLayout(rightZone);
-    rightLay->setContentsMargins(0, 0, 0, 0);
+    rightLay->setContentsMargins(4, 0, 0, 0);
     rightLay->setSpacing(10);
 
     if (!leftCard->property("employeFormWrapped").toBool()) {
@@ -8074,6 +8991,12 @@ void MainWindow::installFournisseursPageClientLikeLayout()
                     ui->btnAjouter_2->click();
             });
 
+            auto *btnMapsTop = new QPushButton(QStringLiteral("Maps"), topActionsCard);
+            btnMapsTop->setIcon(style()->standardIcon(QStyle::SP_DirIcon));
+            btnMapsTop->setCursor(Qt::PointingHandCursor);
+            btnMapsTop->setStyleSheet(btnStyle);
+            connect(btnMapsTop, &QPushButton::clicked, this, &MainWindow::openMap);
+
             auto *searchTop = new QLineEdit(topActionsCard);
             searchTop->setMinimumHeight(34);
             searchTop->setMinimumWidth(250);
@@ -8144,6 +9067,7 @@ void MainWindow::installFournisseursPageClientLikeLayout()
             connect(btnReset, &QPushButton::clicked, this, applyFournisseursTopFilter);
 
             topLay->addWidget(btnExport);
+            topLay->addWidget(btnMapsTop);
             topLay->addStretch(1);
             topLay->addWidget(filterTop);
             topLay->addWidget(searchTop, 1);
@@ -8288,13 +9212,6 @@ void MainWindow::installMatieresPageClientLikeLayout()
             btnBusySeason->setStyleSheet(btnStyle);
             btnBusySeason->setIcon(style()->standardIcon(QStyle::SP_DesktopIcon));
 
-            auto *btnAlerteMp = new QPushButton(QStringLiteral("Alerte MP"), topActionsCard);
-            btnAlerteMp->setCursor(Qt::PointingHandCursor);
-            btnAlerteMp->setMinimumSize(116, 34);
-            btnAlerteMp->setMaximumWidth(116);
-            btnAlerteMp->setStyleSheet(btnStyle);
-            btnAlerteMp->setIcon(style()->standardIcon(QStyle::SP_MessageBoxWarning));
-
             auto *filterTop = new QComboBox(topActionsCard);
             filterTop->setObjectName(QStringLiteral("matieresTopFilterCombo"));
             filterTop->setMinimumSize(130, 34);
@@ -8307,7 +9224,7 @@ void MainWindow::installMatieresPageClientLikeLayout()
             filterTop->addItem(QStringLiteral("Nom cuir"), 2);
             filterTop->addItem(QStringLiteral("Type cuir"), 3);
             filterTop->addItem(QStringLiteral("Gamme"), 4);
-            filterTop->addItem(QStringLiteral("Statut"), 12);
+            filterTop->addItem(QStringLiteral("Statut"), 9);
 
             connect(searchTop, &QLineEdit::textChanged, this, [this](const QString &text) {
                 if (ui->lineEditSearch_6)
@@ -8317,7 +9234,6 @@ void MainWindow::installMatieresPageClientLikeLayout()
             connect(btnSearch, &QPushButton::clicked, this, &MainWindow::on_btnRechercher_5_clicked);
             connect(filterTop, &QComboBox::currentIndexChanged, this, [this](int) { on_btnRechercher_5_clicked(); });
             connect(btnBusySeason, &QPushButton::clicked, this, &MainWindow::onOpenBusySeasonCalendar);
-            connect(btnAlerteMp, &QPushButton::clicked, this, &MainWindow::sendStockAlert);
             connect(btnReset, &QPushButton::clicked, this, [this, searchTop]() {
                 searchTop->clear();
                 if (ui->lineEditSearch_6)
@@ -8335,14 +9251,26 @@ void MainWindow::installMatieresPageClientLikeLayout()
                 "Exporter tout le tableau des matières premières vers un fichier Excel (.xls), comme pour les clients."));
             connect(btnExportMp, &QPushButton::clicked, this, &MainWindow::onExporterMatieresPremieresClicked);
 
+            auto *btnTestAlerteMp = new QPushButton(QStringLiteral("Tester alerte"), topActionsCard);
+            btnTestAlerteMp->setObjectName(QStringLiteral("matieresTopTestAlerteBtn"));
+            btnTestAlerteMp->setCursor(Qt::PointingHandCursor);
+            btnTestAlerteMp->setMinimumSize(130, 34);
+            btnTestAlerteMp->setMaximumWidth(160);
+            btnTestAlerteMp->setStyleSheet(btnStyle);
+            btnTestAlerteMp->setIcon(style()->standardIcon(QStyle::SP_MessageBoxWarning));
+            btnTestAlerteMp->setToolTip(QStringLiteral(
+                "Envoyer un email d'alerte SMTP de test (utilise l'email de la ligne MP selectionnee, "
+                "sinon demande une adresse)."));
+            connect(btnTestAlerteMp, &QPushButton::clicked, this, &MainWindow::onTesterAlerteMpClicked);
+
             topLay->addWidget(btnBusySeason);
-            topLay->addWidget(btnAlerteMp);
+            topLay->addWidget(btnExportMp);
+            topLay->addWidget(btnTestAlerteMp);
             topLay->addStretch(1);
             topLay->addWidget(filterTop);
             topLay->addWidget(searchTop, 1);
             topLay->addWidget(btnSearch);
             topLay->addWidget(btnReset);
-            topLay->addWidget(btnExportMp);
             mainLay->insertWidget(0, topActionsCard, 0);
         }
         ui->page_3->setProperty("clientLikeTopActionsInstalled", true);
@@ -8429,12 +9357,12 @@ void MainWindow::applyMatieresViewFilters()
             }
         }
         if (show && m_mpFilterDisponible) {
-            const QString st = ui->employeeTable_5->item(r, 12) ? ui->employeeTable_5->item(r, 12)->text() : QString();
+            const QString st = ui->employeeTable_5->item(r, 9) ? ui->employeeTable_5->item(r, 9)->text() : QString();
             show = st.contains(QStringLiteral("DISPONIBLE"), Qt::CaseInsensitive);
         }
         if (show && m_mpSeuilCritique >= 0) {
             bool ok = false;
-            const int res = ui->employeeTable_5->item(r, 9) ? ui->employeeTable_5->item(r, 9)->text().toInt(&ok) : 0;
+            const int res = ui->employeeTable_5->item(r, 7) ? ui->employeeTable_5->item(r, 7)->text().toInt(&ok) : 0;
             show = ok && res <= m_mpSeuilCritique;
         }
         ui->employeeTable_5->setRowHidden(r, !show);
@@ -8448,8 +9376,8 @@ void MainWindow::applyMatieresTableSortIfNeeded()
     const int triIdx = ui->comboBoxTri_mp->currentIndex();
     if (triIdx <= 0)
         return;
-    // Ordre du combo (leather house) : Nom, Gamme, Épaisseur, Quantité stock, Type de cuir
-    static const int kCols[] = {-1, 2, 4, 6, 9, 3};
+    // Ordre du combo (leather house) : Nom, Gamme, Email, Quantite stock, Type de cuir
+    static const int kCols[] = {-1, 2, 4, 6, 7, 3};
     if (triIdx < 1 || triIdx >= int(sizeof(kCols) / sizeof(kCols[0])))
         return;
     const int col = kCols[triIdx];
@@ -8482,6 +9410,7 @@ EmployeEditorWidgets MainWindow::employeEditorBindings() const
 {
     EmployeEditorWidgets w;
     w.cin = ui->lineEditCIN;
+    w.idCarte = m_employeIdCarteEdit;
     w.nom = ui->lineEditNom;
     w.prenom = ui->lineEditPrenom;
     w.sexe = ui->comboBoxSexe;
@@ -8523,10 +9452,21 @@ void MainWindow::refreshEmployesTable()
     Employe::applySearchFilter(ui->employeeTable,
                                ui->lineEditSearch ? ui->lineEditSearch->text() : QString());
 
-    if (ui->employeeTable->columnCount() < 12)
-        ui->employeeTable->setColumnCount(12);
-    ui->employeeTable->setHorizontalHeaderItem(10, new QTableWidgetItem(QStringLiteral("SUPPR.")));
-    ui->employeeTable->setHorizontalHeaderItem(11, new QTableWidgetItem(QStringLiteral("MODIF.")));
+    if (ui->employeeTable->columnCount() < 13)
+        ui->employeeTable->setColumnCount(13);
+    ui->employeeTable->setHorizontalHeaderItem(0, new QTableWidgetItem(QStringLiteral("CIN")));
+    ui->employeeTable->setHorizontalHeaderItem(1, new QTableWidgetItem(QStringLiteral("ID Carte")));
+    ui->employeeTable->setHorizontalHeaderItem(2, new QTableWidgetItem(QStringLiteral("Nom")));
+    ui->employeeTable->setHorizontalHeaderItem(3, new QTableWidgetItem(QStringLiteral("Prenom")));
+    ui->employeeTable->setHorizontalHeaderItem(4, new QTableWidgetItem(QStringLiteral("Sexe")));
+    ui->employeeTable->setHorizontalHeaderItem(5, new QTableWidgetItem(QStringLiteral("Salaire")));
+    ui->employeeTable->setHorizontalHeaderItem(6, new QTableWidgetItem(QStringLiteral("Date Embauche")));
+    ui->employeeTable->setHorizontalHeaderItem(7, new QTableWidgetItem(QStringLiteral("Telephone")));
+    ui->employeeTable->setHorizontalHeaderItem(8, new QTableWidgetItem(QStringLiteral("Poste")));
+    ui->employeeTable->setHorizontalHeaderItem(9, new QTableWidgetItem(QStringLiteral("Adresse")));
+    ui->employeeTable->setHorizontalHeaderItem(10, new QTableWidgetItem(QStringLiteral("Email")));
+    ui->employeeTable->setHorizontalHeaderItem(11, new QTableWidgetItem(QStringLiteral("SUPPR.")));
+    ui->employeeTable->setHorizontalHeaderItem(12, new QTableWidgetItem(QStringLiteral("MODIF.")));
 
     for (int row = 0; row < ui->employeeTable->rowCount(); ++row) {
         auto *deleteBtn = new QPushButton(QStringLiteral("♟"), ui->employeeTable);
@@ -8539,7 +9479,7 @@ void MainWindow::refreshEmployesTable()
             onEmployeSelectionChanged();
             onEmployeSupprimerClicked();
         });
-        ui->employeeTable->setCellWidget(row, 10, deleteBtn);
+        ui->employeeTable->setCellWidget(row, 11, deleteBtn);
 
         auto *updateBtn = new QPushButton(QStringLiteral("✎"), ui->employeeTable);
         updateBtn->setToolTip(QStringLiteral("Modifier cet employe"));
@@ -8560,12 +9500,12 @@ void MainWindow::refreshEmployesTable()
             if (ui->employeeTable) {
                 ui->employeeTable->setSelectionMode(QAbstractItemView::NoSelection);
                 for (int r = 0; r < ui->employeeTable->rowCount(); ++r) {
-                    if (QWidget *w = ui->employeeTable->cellWidget(r, 10)) w->setEnabled(false);
                     if (QWidget *w = ui->employeeTable->cellWidget(r, 11)) w->setEnabled(false);
+                    if (QWidget *w = ui->employeeTable->cellWidget(r, 12)) w->setEnabled(false);
                 }
             }
         });
-        ui->employeeTable->setCellWidget(row, 11, updateBtn);
+        ui->employeeTable->setCellWidget(row, 12, updateBtn);
     }
 
     updateEmployesStatsPanel();
@@ -8588,15 +9528,15 @@ void MainWindow::updateEmployesStatsPanel()
         ++total;
 
         bool ok = false;
-        const double sal = ui->employeeTable->item(r, 4)
-            ? ui->employeeTable->item(r, 4)->text().replace(QLatin1Char(','), QLatin1Char('.')).toDouble(&ok)
+        const double sal = ui->employeeTable->item(r, 5)
+            ? ui->employeeTable->item(r, 5)->text().replace(QLatin1Char(','), QLatin1Char('.')).toDouble(&ok)
             : 0.0;
         if (ok) {
             sumSalaire += sal;
             ++countSalaire;
         }
 
-        const QString dateTxt = ui->employeeTable->item(r, 5) ? ui->employeeTable->item(r, 5)->text() : QString();
+        const QString dateTxt = ui->employeeTable->item(r, 6) ? ui->employeeTable->item(r, 6)->text() : QString();
         const QDate d = QDate::fromString(dateTxt, QStringLiteral("dd/MM/yyyy"));
         if (d.isValid() && d.year() == now.year() && d.month() == now.month())
             ++nouveauxMois;
@@ -8658,6 +9598,11 @@ void MainWindow::setupEmployePage()
         formLay->setFieldGrowthPolicy(QFormLayout::ExpandingFieldsGrow);
 
         if (ui->lineEditCIN) ui->lineEditCIN->setPlaceholderText(QStringLiteral("Entrez votre CIN"));
+        if (!m_employeIdCarteEdit) {
+            m_employeIdCarteEdit = new QLineEdit(ui->employeeFormBox);
+            m_employeIdCarteEdit->setObjectName(QStringLiteral("lineEditIdCarte"));
+        }
+        m_employeIdCarteEdit->setPlaceholderText(QStringLiteral("Entrez l'ID carte"));
         if (ui->lineEditNom) ui->lineEditNom->setPlaceholderText(QStringLiteral("Entrez votre nom"));
         if (ui->lineEditPrenom) ui->lineEditPrenom->setPlaceholderText(QStringLiteral("Entrez votre prenom"));
         if (ui->lineEditAdresse) ui->lineEditAdresse->setPlaceholderText(QStringLiteral("Entrez votre adresse"));
@@ -8667,6 +9612,7 @@ void MainWindow::setupEmployePage()
         if (ui->lineEditSalaire) ui->lineEditSalaire->setPlaceholderText(QStringLiteral("Salaire"));
         const QList<QWidget *> employeFields = {
             static_cast<QWidget *>(ui->lineEditCIN),
+            static_cast<QWidget *>(m_employeIdCarteEdit),
             static_cast<QWidget *>(ui->lineEditNom),
             static_cast<QWidget *>(ui->lineEditPrenom),
             static_cast<QWidget *>(ui->lineEditAdresse),
@@ -8686,6 +9632,7 @@ void MainWindow::setupEmployePage()
         }
 
         formLay->addRow(new QLabel(QStringLiteral("CIN"), formWrap), ui->lineEditCIN);
+        formLay->addRow(new QLabel(QStringLiteral("ID carte"), formWrap), m_employeIdCarteEdit);
         formLay->addRow(new QLabel(QStringLiteral("Nom"), formWrap), ui->lineEditNom);
         formLay->addRow(new QLabel(QStringLiteral("Prenom"), formWrap), ui->lineEditPrenom);
         formLay->addRow(new QLabel(QStringLiteral("Adresse"), formWrap), ui->lineEditAdresse);
@@ -8729,8 +9676,8 @@ void MainWindow::setupEmployePage()
                 if (ui->employeeTable) {
                     ui->employeeTable->setSelectionMode(QAbstractItemView::SingleSelection);
                     for (int r = 0; r < ui->employeeTable->rowCount(); ++r) {
-                        if (QWidget *w = ui->employeeTable->cellWidget(r, 10)) w->setEnabled(true);
                         if (QWidget *w = ui->employeeTable->cellWidget(r, 11)) w->setEnabled(true);
+                        if (QWidget *w = ui->employeeTable->cellWidget(r, 12)) w->setEnabled(true);
                     }
                 }
             });
@@ -8860,6 +9807,7 @@ void MainWindow::onEmployeAjouterClicked()
     const QDate dEmb = w.dateEmbauche ? w.dateEmbauche->date() : QDate::currentDate();
 
     Employe e(cin,
+              w.idCarte ? w.idCarte->text().trimmed() : QString(),
               w.nom->text().trimmed(),
               w.prenom->text().trimmed(),
               w.sexe->currentText(),
@@ -8912,6 +9860,7 @@ void MainWindow::onEmployeModifierClicked()
     const QDate dEmb = w.dateEmbauche ? w.dateEmbauche->date() : QDate::currentDate();
 
     Employe e(w.cin->text().trimmed(),
+              w.idCarte ? w.idCarte->text().trimmed() : QString(),
               w.nom->text().trimmed(),
               w.prenom->text().trimmed(),
               w.sexe->currentText(),
@@ -8944,8 +9893,8 @@ void MainWindow::onEmployeModifierClicked()
     if (ui->employeeTable) {
         ui->employeeTable->setSelectionMode(QAbstractItemView::SingleSelection);
         for (int r = 0; r < ui->employeeTable->rowCount(); ++r) {
-            if (QWidget *w = ui->employeeTable->cellWidget(r, 10)) w->setEnabled(true);
             if (QWidget *w = ui->employeeTable->cellWidget(r, 11)) w->setEnabled(true);
+            if (QWidget *w = ui->employeeTable->cellWidget(r, 12)) w->setEnabled(true);
         }
     }
     QMessageBox::information(this, QStringLiteral("Employes"), QStringLiteral("Modification enregistree."));
@@ -9114,7 +10063,6 @@ void MainWindow::setupMatierePage()
             static_cast<QWidget *>(ui->comboBoxSexe_2),
             static_cast<QWidget *>(ui->lineEditTelephone_2),
             static_cast<QWidget *>(ui->lineEditPoste_2),
-            static_cast<QWidget *>(ui->lineEditAdresse_4),
             static_cast<QWidget *>(ui->lineEditEmail_4),
             static_cast<QWidget *>(ui->dateEditEmbauche_2),
             static_cast<QWidget *>(ui->lineEditStatut_5),
@@ -9135,8 +10083,7 @@ void MainWindow::setupMatierePage()
         formLay->addRow(new QLabel(QStringLiteral("Gamme"), formWrap), ui->comboBoxSexe_2);
         formLay->addRow(new QLabel(QStringLiteral("Couleur"), formWrap), ui->lineEditTelephone_2);
         formLay->addRow(new QLabel(QStringLiteral("Qt stock"), formWrap), ui->lineEditPoste_2);
-        formLay->addRow(new QLabel(QStringLiteral("Epaisseur"), formWrap), ui->lineEditAdresse_4);
-        formLay->addRow(new QLabel(QStringLiteral("Origine"), formWrap), ui->lineEditEmail_4);
+        formLay->addRow(new QLabel(QStringLiteral("Email"), formWrap), ui->lineEditEmail_4);
         formLay->addRow(new QLabel(QStringLiteral("Date achat"), formWrap), ui->dateEditEmbauche_2);
         formLay->addRow(new QLabel(QStringLiteral("Statut"), formWrap), ui->lineEditStatut_5);
         ui->formOuterLayout_5->insertWidget(1, formWrap);
@@ -9173,8 +10120,8 @@ void MainWindow::setupMatierePage()
                 if (ui->employeeTable_5) {
                     ui->employeeTable_5->setSelectionMode(QAbstractItemView::SingleSelection);
                     for (int r = 0; r < ui->employeeTable_5->rowCount(); ++r) {
-                        if (QWidget *w = ui->employeeTable_5->cellWidget(r, 13)) w->setEnabled(true);
-                        if (QWidget *w = ui->employeeTable_5->cellWidget(r, 14)) w->setEnabled(true);
+                        if (QWidget *w = ui->employeeTable_5->cellWidget(r, 10)) w->setEnabled(true);
+                        if (QWidget *w = ui->employeeTable_5->cellWidget(r, 11)) w->setEnabled(true);
                     }
                 }
             });
@@ -9192,7 +10139,7 @@ void MainWindow::setupMatierePage()
     if (ui->btnAjouter_7)
         ui->btnAjouter_7->show();
 
-    ui->employeeTable_5->setColumnCount(15);
+    ui->employeeTable_5->setColumnCount(12);
     ui->employeeTable_5->setHorizontalHeaderLabels({
         QStringLiteral("ID"),
         QStringLiteral("Reference"),
@@ -9200,18 +10147,32 @@ void MainWindow::setupMatierePage()
         QStringLiteral("Type de cuir"),
         QStringLiteral("Gamme"),
         QStringLiteral("Couleur"),
-        QStringLiteral("Epaisseur"),
-        QStringLiteral("Origine"),
-        QStringLiteral("Fournisseur associe"),
+        QStringLiteral("Email"),
         QStringLiteral("Quantite de stock"),
         QStringLiteral("Prix"),
-        QStringLiteral("Date d'achat"),
         QStringLiteral("Status"),
         QStringLiteral("SUPPR."),
         QStringLiteral("MODIF."),
     });
-    ui->employeeTable_5->horizontalHeader()->setStretchLastSection(true);
-    ui->employeeTable_5->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    ui->employeeTable_5->horizontalHeader()->setStretchLastSection(false);
+    ui->employeeTable_5->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
+    ui->employeeTable_5->horizontalHeader()->setMinimumSectionSize(70);
+    ui->employeeTable_5->horizontalHeader()->setDefaultSectionSize(112);
+    ui->employeeTable_5->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);   // ID
+    ui->employeeTable_5->horizontalHeader()->setSectionResizeMode(10, QHeaderView::Fixed);              // SUPPR.
+    ui->employeeTable_5->horizontalHeader()->setSectionResizeMode(11, QHeaderView::Fixed);              // MODIF.
+    ui->employeeTable_5->setColumnWidth(10, 82);
+    ui->employeeTable_5->setColumnWidth(11, 82);
+    ui->employeeTable_5->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
+    ui->employeeTable_5->setTextElideMode(Qt::ElideRight);
+    ui->employeeTable_5->setWordWrap(false);
+    ui->employeeTable_5->verticalHeader()->setDefaultSectionSize(34);
+    ui->employeeTable_5->horizontalHeader()->setMinimumHeight(36);
+    {
+        QFont headerFont = ui->employeeTable_5->horizontalHeader()->font();
+        headerFont.setBold(true);
+        ui->employeeTable_5->horizontalHeader()->setFont(headerFont);
+    }
     ui->employeeTable_5->setSelectionBehavior(QAbstractItemView::SelectRows);
     ui->employeeTable_5->setSelectionMode(QAbstractItemView::SingleSelection);
     ui->employeeTable_5->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -9245,15 +10206,12 @@ void MainWindow::setupMatierePage()
         ui->lineEditPoste_2->setPlaceholderText(QStringLiteral("Quantite en stock (entier)"));
         ui->lineEditPoste_2->setValidator(new QIntValidator(0, 999999999, this));
     }
-    if (ui->lineEditAdresse_4) {
-        ui->lineEditAdresse_4->clear();
-        ui->lineEditAdresse_4->setPlaceholderText(QStringLiteral("Epaisseur (ex. 1,2 ou 1.2)"));
-        static const QRegularExpression kEpaisseurSaisie(QStringLiteral(R"(^\d*([.,]\d{0,3})?$)"));
-        ui->lineEditAdresse_4->setValidator(new QRegularExpressionValidator(kEpaisseurSaisie, this));
-    }
     if (ui->lineEditEmail_4) {
         ui->lineEditEmail_4->clear();
-        ui->lineEditEmail_4->setPlaceholderText(QStringLiteral("Origine"));
+        ui->lineEditEmail_4->setPlaceholderText(QStringLiteral("contact@fournisseur.com"));
+        static const QRegularExpression kEmailSaisie(
+            QStringLiteral("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$"));
+        ui->lineEditEmail_4->setValidator(new QRegularExpressionValidator(kEmailSaisie, this));
     }
     if (ui->lineEditTelephone_2) {
         ui->lineEditTelephone_2->clear();
@@ -9309,8 +10267,7 @@ MatierePremiereEditorWidgets MainWindow::matiereEditorBindings() const
     w.gamme = ui->comboBoxSexe_2;
     w.couleur = ui->lineEditTelephone_2;
     w.statut = ui->lineEditStatut_5;
-    w.epaisseur = ui->lineEditAdresse_4;
-    w.origine = ui->lineEditEmail_4;
+    w.email = ui->lineEditEmail_4;
     w.reserve = ui->lineEditPoste_2;
     w.fournisseurAffiche = nullptr;
     w.prixAffiche = nullptr;
@@ -9321,7 +10278,7 @@ MatierePremiereEditorWidgets MainWindow::matiereEditorBindings() const
 bool MainWindow::readMatiereFromForm(MatierePremiere &out) const
 {
     const MatierePremiereEditorWidgets w = matiereEditorBindings();
-    if (!w.reference || !w.nomCuir || !w.typeCuir || !w.gamme || !w.couleur || !w.statut || !w.epaisseur || !w.origine
+    if (!w.reference || !w.nomCuir || !w.typeCuir || !w.gamme || !w.couleur || !w.statut || !w.email
         || !w.reserve) {
         return false;
     }
@@ -9336,12 +10293,8 @@ bool MainWindow::readMatiereFromForm(MatierePremiere &out) const
             return false;
     }
 
-    bool okE = false;
-    QString epRaw = w.epaisseur->text().trimmed();
-    epRaw.remove(QLatin1Char(' '));
-    epRaw.replace(QLatin1Char(','), QLatin1Char('.'));
-    const double ep = epRaw.toDouble(&okE);
-    if (!okE || ep < 0.0)
+    const QRegularExpression emailRegex(QStringLiteral("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$"));
+    if (!emailRegex.match(w.email->text().trimmed()).hasMatch())
         return false;
     bool okR = false;
     const int res = w.reserve->text().trimmed().toInt(&okR);
@@ -9356,8 +10309,7 @@ bool MainWindow::readMatiereFromForm(MatierePremiere &out) const
                           gammeTxt,
                           w.couleur->text().trimmed(),
                           w.statut->text().trimmed(),
-                          ep,
-                          w.origine->text().trimmed(),
+                          w.email->text().trimmed(),
                           res);
     return true;
 }
@@ -9387,10 +10339,10 @@ void MainWindow::refreshMatieresTable()
                              QStringLiteral("Chargement impossible.\n%1").arg(err));
         return;
     }
-    if (ui->employeeTable_5->columnCount() < 15)
-        ui->employeeTable_5->setColumnCount(15);
-    ui->employeeTable_5->setHorizontalHeaderItem(13, new QTableWidgetItem(QStringLiteral("SUPPR.")));
-    ui->employeeTable_5->setHorizontalHeaderItem(14, new QTableWidgetItem(QStringLiteral("MODIF.")));
+    if (ui->employeeTable_5->columnCount() < 12)
+        ui->employeeTable_5->setColumnCount(12);
+    ui->employeeTable_5->setHorizontalHeaderItem(10, new QTableWidgetItem(QStringLiteral("SUPPR.")));
+    ui->employeeTable_5->setHorizontalHeaderItem(11, new QTableWidgetItem(QStringLiteral("MODIF.")));
     for (int row = 0; row < ui->employeeTable_5->rowCount(); ++row) {
         auto *deleteBtn = new QPushButton(QStringLiteral("♟"), ui->employeeTable_5);
         deleteBtn->setToolTip(QStringLiteral("Supprimer cette matiere premiere"));
@@ -9402,7 +10354,7 @@ void MainWindow::refreshMatieresTable()
             on_employeeTable_5_cellClicked(row, 0);
             on_btnSupprimer_5_clicked();
         });
-        ui->employeeTable_5->setCellWidget(row, 13, deleteBtn);
+        ui->employeeTable_5->setCellWidget(row, 10, deleteBtn);
 
         auto *updateBtn = new QPushButton(QStringLiteral("✎"), ui->employeeTable_5);
         updateBtn->setToolTip(QStringLiteral("Modifier cette matiere premiere"));
@@ -9423,12 +10375,12 @@ void MainWindow::refreshMatieresTable()
             if (ui->employeeTable_5) {
                 ui->employeeTable_5->setSelectionMode(QAbstractItemView::NoSelection);
                 for (int r = 0; r < ui->employeeTable_5->rowCount(); ++r) {
-                    if (QWidget *w = ui->employeeTable_5->cellWidget(r, 13)) w->setEnabled(false);
-                    if (QWidget *w = ui->employeeTable_5->cellWidget(r, 14)) w->setEnabled(false);
+                    if (QWidget *w = ui->employeeTable_5->cellWidget(r, 10)) w->setEnabled(false);
+                    if (QWidget *w = ui->employeeTable_5->cellWidget(r, 11)) w->setEnabled(false);
                 }
             }
         });
-        ui->employeeTable_5->setCellWidget(row, 14, updateBtn);
+        ui->employeeTable_5->setCellWidget(row, 11, updateBtn);
     }
 
     applyMatieresViewFilters();
@@ -9482,6 +10434,8 @@ void MainWindow::on_btnRechercher_5_clicked()
 {
     applyMatieresViewFilters();
     applyMatieresTableSortIfNeeded();
+    if (m_firebaseManager && m_firebaseManager->isConfigured())
+        m_firebaseManager->fetchMatieresPremieres();
     if (ui->page_3) {
         if (QComboBox *combo = ui->page_3->findChild<QComboBox *>(QStringLiteral("matieresTopFilterCombo"))) {
             const QString q = ui->lineEditSearch_6 ? ui->lineEditSearch_6->text() : QString();
@@ -9510,8 +10464,8 @@ void MainWindow::on_btnAjouter_7_clicked()
     QWidget *firstInvalid = nullptr;
     MatierePremiere m;
     if (!readMatiereFromForm(m)) {
-        errors << QStringLiteral("- Verifiez : reference, nom du cuir, type, gamme, couleur, statut, origine.");
-        errors << QStringLiteral("- Epaisseur : nombre valide (ex. 1,2 ou 1.2).");
+        errors << QStringLiteral("- Verifiez : reference, nom du cuir, type, gamme, couleur, statut, email.");
+        errors << QStringLiteral("- Email : format valide (ex. nom@domaine.com).");
         errors << QStringLiteral("- Quantite : entier >= 0.");
         if (!firstInvalid) firstInvalid = ui->lineEditNom_5;
     }
@@ -9550,8 +10504,7 @@ void MainWindow::on_btnAjouter_7_clicked()
                              m.getGamme(),
                              m.getCouleur(),
                              m.getStatut(),
-                             m.getEpaisseur(),
-                             m.getOrigine(),
+                             m.getEmail(),
                              m.getReserve());
     const QString confirmMsg = QStringLiteral("Confirmer l'ajout de la matiere premiere ID %1 ?").arg(nid);
     if (QMessageBox::question(this, QStringLiteral("Matieres premieres"), confirmMsg,
@@ -9564,9 +10517,16 @@ void MainWindow::on_btnAjouter_7_clicked()
                               QStringLiteral("Echec ajout:\n%1").arg(MatierePremiere::lastSqlError));
         return;
     }
+    if (m_firebaseManager && m_firebaseManager->isConfigured())
+        m_firebaseManager->postMatierePremiere(toInsert);
+    const QString smtpStatus = sendMpLowStockAlertIfNeeded(toInsert);
     refreshMatieresTable();
     clearMatiereForm();
-    QMessageBox::information(this, QStringLiteral("Matieres premieres"), QStringLiteral("Ajoute (ID %1).").arg(nid));
+    const QString doneMsg = smtpStatus.isEmpty()
+                                ? QStringLiteral("Ajoute (ID %1).").arg(nid)
+                                : QStringLiteral("Ajoute (ID %1).\n%2")
+                                      .arg(QString::number(nid), smtpStatus);
+    QMessageBox::information(this, QStringLiteral("Matieres premieres"), doneMsg);
 }
 
 void MainWindow::on_btnModifier_5_clicked()
@@ -9609,8 +10569,7 @@ void MainWindow::on_btnModifier_5_clicked()
                         m.getGamme(),
                         m.getCouleur(),
                         m.getStatut(),
-                        m.getEpaisseur(),
-                        m.getOrigine(),
+                        m.getEmail(),
                         m.getReserve());
     const QString confirmMsg = QStringLiteral("Confirmer la modification de la matiere premiere ID %1 ?").arg(m_matiereSelectedId);
     if (QMessageBox::question(this, QStringLiteral("Matieres premieres"), confirmMsg,
@@ -9623,6 +10582,9 @@ void MainWindow::on_btnModifier_5_clicked()
                               QStringLiteral("Echec modification:\n%1").arg(MatierePremiere::lastSqlError));
         return;
     }
+    if (m_firebaseManager && m_firebaseManager->isConfigured())
+        m_firebaseManager->postMatierePremiere(upd);
+    const QString smtpStatus = sendMpLowStockAlertIfNeeded(upd);
     m_matiereSelectedId = newId;
     m_matiereEditMode = false;
     m_matiereEditingId = -1;
@@ -9633,14 +10595,15 @@ void MainWindow::on_btnModifier_5_clicked()
     if (ui->employeeTable_5) {
         ui->employeeTable_5->setSelectionMode(QAbstractItemView::SingleSelection);
         for (int r = 0; r < ui->employeeTable_5->rowCount(); ++r) {
-            if (QWidget *w = ui->employeeTable_5->cellWidget(r, 13)) w->setEnabled(true);
-            if (QWidget *w = ui->employeeTable_5->cellWidget(r, 14)) w->setEnabled(true);
+            if (QWidget *w = ui->employeeTable_5->cellWidget(r, 10)) w->setEnabled(true);
+            if (QWidget *w = ui->employeeTable_5->cellWidget(r, 11)) w->setEnabled(true);
         }
     }
     if (ui->lineEditCIN_5)
         ui->lineEditCIN_5->setText(QString::number(newId));
     refreshMatieresTable();
-    QMessageBox::information(this, QStringLiteral("Matieres premieres"), QStringLiteral("Modifie."));
+    const QString doneMsg = smtpStatus.isEmpty() ? QStringLiteral("Modifie.") : QStringLiteral("Modifie.\n%1").arg(smtpStatus);
+    QMessageBox::information(this, QStringLiteral("Matieres premieres"), doneMsg);
 }
 
 void MainWindow::on_btnSupprimer_5_clicked()
@@ -9746,6 +10709,85 @@ void MainWindow::on_btnAfficherTous_clicked()
         ui->comboBoxTri_mp->blockSignals(false);
     }
     refreshMatieresTable();
+}
+
+void MainWindow::onTesterAlerteMpClicked()
+{
+    QString destinataire;
+    QString refLigne;
+    QString nomLigne;
+    int qteLigne = -1;
+
+    if (ui->employeeTable_5 && m_matiereSelectedId > 0) {
+        for (int r = 0; r < ui->employeeTable_5->rowCount(); ++r) {
+            QTableWidgetItem *idIt = ui->employeeTable_5->item(r, 0);
+            if (!idIt)
+                continue;
+            if (idIt->text().toInt() == m_matiereSelectedId) {
+                if (QTableWidgetItem *itEmail = ui->employeeTable_5->item(r, 6))
+                    destinataire = itEmail->text().trimmed();
+                if (QTableWidgetItem *itRef = ui->employeeTable_5->item(r, 1))
+                    refLigne = itRef->text().trimmed();
+                if (QTableWidgetItem *itNom = ui->employeeTable_5->item(r, 2))
+                    nomLigne = itNom->text().trimmed();
+                if (QTableWidgetItem *itQte = ui->employeeTable_5->item(r, 7))
+                    qteLigne = itQte->text().trimmed().toInt();
+                break;
+            }
+        }
+    }
+
+    if (destinataire.isEmpty()) {
+        bool ok = false;
+        const QString saisi = QInputDialog::getText(
+                                  this,
+                                  QStringLiteral("Tester alerte SMTP"),
+                                  QStringLiteral("Aucune ligne MP avec email selectionnee.\n"
+                                                 "Saisissez l'adresse email du destinataire :"),
+                                  QLineEdit::Normal,
+                                  QString(),
+                                  &ok)
+                                  .trimmed();
+        if (!ok || saisi.isEmpty())
+            return;
+        destinataire = saisi;
+    }
+
+    const QRegularExpression rx(QStringLiteral("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$"));
+    if (!rx.match(destinataire).hasMatch()) {
+        QMessageBox::warning(this, QStringLiteral("Tester alerte SMTP"),
+                             QStringLiteral("Adresse email invalide : %1").arg(destinataire));
+        return;
+    }
+
+    const QString subject = QStringLiteral("Test alerte stock MP");
+    QString body = QStringLiteral(
+                       "Ceci est un test d'alerte SMTP envoye par l'application Leather House.\n\n");
+    if (!refLigne.isEmpty() || !nomLigne.isEmpty() || qteLigne >= 0) {
+        body += QStringLiteral("Contexte ligne MP selectionnee :\n");
+        if (!refLigne.isEmpty())
+            body += QStringLiteral(" - Reference : %1\n").arg(refLigne);
+        if (!nomLigne.isEmpty())
+            body += QStringLiteral(" - Nom cuir  : %1\n").arg(nomLigne);
+        if (qteLigne >= 0)
+            body += QStringLiteral(" - Quantite  : %1\n").arg(QString::number(qteLigne));
+        body += QStringLiteral(" - Seuil     : %1\n")
+                    .arg(QString::number(mpAlertThreshold()));
+    } else {
+        body += QStringLiteral("Aucune ligne MP selectionnee, message envoye en mode test pur.\n");
+    }
+    body += QStringLiteral("\nSi vous recevez cet email, la configuration SMTP est operationnelle.\n");
+
+    QString smtpErr;
+    if (!LeatherSmtp::sendEmail(destinataire, subject, body, LeatherSmtp::Profile::Survey, &smtpErr)) {
+        QMessageBox::critical(this, QStringLiteral("Tester alerte SMTP"),
+                              QStringLiteral("Echec envoi alerte test :\n%1").arg(smtpErr));
+        return;
+    }
+    QMessageBox::information(
+        this,
+        QStringLiteral("Tester alerte SMTP"),
+        QStringLiteral("Alerte test envoyee a %1.").arg(destinataire));
 }
 
 void MainWindow::onOpenBusySeasonCalendar()

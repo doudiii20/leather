@@ -185,6 +185,14 @@ bool sendEmail(const QString &to,
     sock.flush();
     r = readSmtpChunk(sock);
     if (!lastLineCode(r).startsWith(QLatin1String("235"))) {
+        if (profile == Profile::Survey) {
+            QString fallbackErr;
+            if (sendEmail(to, subject, plainBody, Profile::Default, &fallbackErr))
+                return true;
+            return fail(QStringLiteral("Authentification refusee: %1\n"
+                                       "Le profil Survey a echoue, puis le fallback global LEATHER_SMTP_USER/LEATHER_SMTP_PASS a aussi echoue:\n%2")
+                            .arg(lastLineCode(r).left(300), fallbackErr));
+        }
         return fail(QStringLiteral("Authentification refusee: %1\n"
                                    "Verifiez les variables de ce profil (%2) ou le fallback LEATHER_SMTP_USER/LEATHER_SMTP_PASS "
                                    "(mot de passe d'application Google, 16 caracteres, sans espaces).")

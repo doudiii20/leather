@@ -11,6 +11,7 @@
 #include <QStackedWidget>
 #include <QMessageBox>
 #include <QNetworkAccessManager>
+#include <QSerialPort>
 #include <QLabel>
 #include <QImage>
 #include <QHash>
@@ -52,6 +53,7 @@ class ChatbotService;
 class FournisseurApiService;
 class ClientNotificationService;
 class WhatsAppBusinessService;
+class FirebaseManager;
 class QScrollArea;
 class QTextEdit;
 class QLineEdit;
@@ -116,7 +118,8 @@ private:
     void loadClients();
     void onAnalyzeClientsClicked();
     void applyClientScoringResults(const QHash<int, int> &scoresByClientId,
-                                   const QHash<int, QString> &statusByClientId);
+                                   const QHash<int, QString> &statusByClientId,
+                                   const QHash<int, double> &creditUsedByClientId);
     bool isNumverifyPhoneValid(const QString &phone, bool *isValid, QString *errorMessage) const;
     void fillClientFormFromSelectedRow();
     void clearClientForm();
@@ -175,6 +178,7 @@ private:
     ChatbotService *m_chatbotService = nullptr;
     FournisseurApiService *m_fournisseurApiService = nullptr;
     WhatsAppBusinessService *m_whatsappBusinessService = nullptr;
+    FirebaseManager *m_firebaseManager = nullptr;
     /// Numero E.164 affiche dans le message de succes apres envoi WhatsApp (depuis onClientWhatsAppClicked).
     QString m_lastWhatsAppDestinationDisplay;
     AssistantWindow *m_assistantWindow = nullptr;
@@ -203,6 +207,7 @@ private:
     QPushButton *m_produitCancelEditButton = nullptr;
     QPushButton *m_produitVoirQrButton = nullptr;
     QLabel *m_produitQrLabel = nullptr;
+    QLineEdit *m_produitNumeroEdit = nullptr;
     QString m_lastProduitQrPath;
     QHash<QString, QPixmap> m_produitQrPixmapCache;
     bool m_produitUiWired = false;
@@ -216,6 +221,7 @@ private:
     bool m_employeEditMode = false;
     QString m_employeEditingCin;
     QPushButton *m_employeCancelEditButton = nullptr;
+    QLineEdit *m_employeIdCarteEdit = nullptr;
     bool m_employeUiWired = false;
     QPushButton *m_employeExportExcelBtn = nullptr;
     /// 0 = menu principal (hub), 1 = interface avec barre de navigation + contentStack
@@ -284,6 +290,17 @@ private:
     void applyGlobalAppearanceFromSettings();
     void installApplicationTranslators();
     void refreshFaceLoginButtonVisibility();
+    void initDoorSerialPort();
+    void sendFaceOk();
+    bool ensureDoorAccessSchema(QString *errorMessage = nullptr);
+    void logDoorAccessEvent(const QString &status, const QString &uid, const QString &rawLine);
+    QString extractRfidCardFromLine(const QString &line) const;
+    bool findEmployeByCardUid(const QString &idCarte, QString *cinEmploye, QString *nomEmploye, QString *errorMessage = nullptr);
+    bool resolveNextPointageType(const QString &idCarte, QString *typeOut, QString *errorMessage = nullptr);
+    bool insertEmployePointage(const QString &idCarte, const QString &cinEmploye, const QString &nomEmploye, const QString &type, QString *errorMessage = nullptr);
+    void processFaceRfidLine(const QString &line);
+    void onDoorSerialReadyRead();
+    void onFaceRfidTimeout();
     void finishFaceIdLoginSession();
     void applyProfileDisplayFromSettings();
     void onPasswordChangeFromSettings(const QString &username, const QString &oldPassword, const QString &newPassword);
@@ -330,6 +347,13 @@ private:
     QtCharts::QChartView *m_dashOrdersBarChartView = nullptr;
 #endif
     QTimer *m_statsAutoRefreshTimer = nullptr;
+    QSerialPort *m_doorSerialPort = nullptr;
+    QByteArray m_doorSerialBuffer;
+    QTimer *m_faceRfidTimeoutTimer = nullptr;
+    bool m_waitingRfidAfterFace = false;
+    bool m_faceStepValidated = false;
+    int m_facePendingEmployeId = -1;
+    QString m_facePendingEmployeNom;
     QComboBox *m_dashThemeCombo = nullptr;
     QCheckBox *m_dashAnimCheck = nullptr;
     QComboBox *m_dashLegendCombo = nullptr;
@@ -344,12 +368,13 @@ protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
 
 private slots:
-    void sendStockAlert();
     void loadStats();
     void loadStockFaible();
     void loadPrediction();
     void on_btnAjouter_8_clicked();
+    void on_btnRfidLogin_clicked();
     void onFaceLoginRequested();
+    void onRfidLoginRequested();
     void onGlobalChatbotClicked();
     void on_btnSignUp_clicked();
     void on_btnMpremieres_2_clicked();
@@ -367,13 +392,13 @@ private slots:
     void onExporterMatieresPremieresClicked();
     void onClientSurveySmsClicked();
     void onClientWhatsAppClicked();
+    void onProduitSendAlertClicked();
     void on_employeeTable_4_cellClicked(int row, int column);
     void on_produitTable_cellClicked(int row, int column);
     void on_btnAjouter_6_clicked();
     void on_btnModifier_4_clicked();
     void on_btnSupprimer_4_clicked();
     void on_btnRechercher_4_clicked();
-    void on_pushButton_6_clicked();
     void on_pushButton_8_clicked();
     void on_pushButton_7_clicked();
     void on_employeeTable_5_cellClicked(int row, int column);
@@ -386,6 +411,7 @@ private slots:
     void on_btnFiltreDisponible_clicked();
     void on_btnFiltreSeuilCritique_clicked();
     void on_btnAfficherTous_clicked();
+    void onTesterAlerteMpClicked();
     void onOpenBusySeasonCalendar();
     /// Boutons page Matières premières : OAuth Google Calendar (voir installMatieresPageClientLikeLayout dans mainwindow.cpp).
     void connectToGoogle();

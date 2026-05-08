@@ -66,8 +66,7 @@ MatierePremiere::MatierePremiere(int id,
                                  const QString &gamme,
                                  const QString &couleur,
                                  const QString &statut,
-                                 double epaisseur,
-                                 const QString &origine,
+                                 const QString &email,
                                  int reserve)
     : m_id(id)
     , m_reference(ref)
@@ -76,8 +75,7 @@ MatierePremiere::MatierePremiere(int id,
     , m_gamme(gamme)
     , m_couleur(couleur)
     , m_statut(statut)
-    , m_epaisseur(epaisseur)
-    , m_origine(origine)
+    , m_email(email)
     , m_reserve(reserve)
 {
 }
@@ -98,11 +96,24 @@ bool MatierePremiere::ensureSchema(QString *errorMessage)
                        "GAMME VARCHAR2(80), "
                        "COULEUR VARCHAR2(80), "
                        "STATUT VARCHAR2(40), "
-                       "EPAISSEUR NUMBER(10,2), "
-                       "ORIGINE VARCHAR2(120), "
+                       "EMAIL_CONTACT VARCHAR2(255), "
                        "RESERVE NUMBER(12) DEFAULT 0"
                        ")'; EXCEPTION WHEN OTHERS THEN IF SQLCODE != -955 THEN RAISE; END IF; END;");
-    return execSql(create, errorMessage);
+    if (!execSql(create, errorMessage))
+        return false;
+
+    // Migration schema legacy -> nouveau modèle (suppression définitive des anciens champs).
+    const QString addEmail =
+        QStringLiteral("BEGIN EXECUTE IMMEDIATE 'ALTER TABLE MATIERES_PREMIERES ADD (EMAIL_CONTACT VARCHAR2(255))'; "
+                       "EXCEPTION WHEN OTHERS THEN IF SQLCODE != -1430 THEN RAISE; END IF; END;");
+    const QString dropLegacyColumn1 =
+        QStringLiteral("BEGIN EXECUTE IMMEDIATE 'ALTER TABLE MATIERES_PREMIERES DROP COLUMN EPAISSEUR'; "
+                       "EXCEPTION WHEN OTHERS THEN IF SQLCODE != -904 THEN RAISE; END IF; END;");
+    const QString dropLegacyColumn2 =
+        QStringLiteral("BEGIN EXECUTE IMMEDIATE 'ALTER TABLE MATIERES_PREMIERES DROP COLUMN ORIGINE'; "
+                       "EXCEPTION WHEN OTHERS THEN IF SQLCODE != -904 THEN RAISE; END IF; END;");
+    return execSql(addEmail, errorMessage) && execSql(dropLegacyColumn1, errorMessage)
+           && execSql(dropLegacyColumn2, errorMessage);
 }
 
 void MatierePremiere::seedDemoIfEmpty(QString *errorMessage)
@@ -124,8 +135,7 @@ void MatierePremiere::seedDemoIfEmpty(QString *errorMessage)
                       QStringLiteral("Supreme"),
                       QStringLiteral("Naturel"),
                       QStringLiteral("Disponible"),
-                      1.4,
-                      QStringLiteral("Italie"),
+                      QStringLiteral("fournisseur1@example.com"),
                       42);
     if (!a.ajouter()) {
         if (errorMessage)
@@ -142,8 +152,7 @@ void MatierePremiere::seedDemoIfEmpty(QString *errorMessage)
                       QStringLiteral("Economy"),
                       QStringLiteral("Noir"),
                       QStringLiteral("Disponible"),
-                      1.1,
-                      QStringLiteral("Maroc"),
+                      QStringLiteral("fournisseur2@example.com"),
                       8);
     b.ajouter();
 }
@@ -184,7 +193,7 @@ bool MatierePremiere::populateTable(QTableWidget *table, QString *errorMessage)
     }
     QSqlQuery q;
     if (!q.exec(QStringLiteral(
-            "SELECT ID, REFERENCE_INTERNE, NOM_CUIR, TYPE_CUIR, GAMME, COULEUR, EPAISSEUR, ORIGINE, RESERVE, STATUT "
+            "SELECT ID, REFERENCE_INTERNE, NOM_CUIR, TYPE_CUIR, GAMME, COULEUR, EMAIL_CONTACT, RESERVE, STATUT "
             "FROM MATIERES_PREMIERES ORDER BY ID"))) {
         lastSqlError = q.lastError().text();
         if (errorMessage)
@@ -201,10 +210,9 @@ bool MatierePremiere::populateTable(QTableWidget *table, QString *errorMessage)
         const QString type = q.value(3).toString();
         const QString gamme = q.value(4).toString();
         const QString couleur = q.value(5).toString();
-        const double ep = q.value(6).toDouble();
-        const QString orig = q.value(7).toString();
-        const int res = q.value(8).toInt();
-        const QString stat = q.value(9).toString();
+        const QString email = q.value(6).toString();
+        const int res = q.value(7).toInt();
+        const QString stat = q.value(8).toString();
 
         const bool critique = res <= 10;
         const auto mk = [critique](const QString &txt) -> QTableWidgetItem * {
@@ -220,13 +228,10 @@ bool MatierePremiere::populateTable(QTableWidget *table, QString *errorMessage)
         table->setItem(row, 3, mk(type));
         table->setItem(row, 4, mk(gamme));
         table->setItem(row, 5, mk(couleur));
-        table->setItem(row, 6, mk(QString::number(ep, 'f', 2)));
-        table->setItem(row, 7, mk(orig));
+        table->setItem(row, 6, mk(email));
+        table->setItem(row, 7, mk(QString::number(res)));
         table->setItem(row, 8, mk(QStringLiteral("-")));
-        table->setItem(row, 9, mk(QString::number(res)));
-        table->setItem(row, 10, mk(QStringLiteral("-")));
-        table->setItem(row, 11, mk(QStringLiteral("-")));
-        table->setItem(row, 12, mk(stat.isEmpty() ? QStringLiteral("Disponible") : stat));
+        table->setItem(row, 9, mk(stat.isEmpty() ? QStringLiteral("Disponible") : stat));
     }
     return true;
 }
@@ -269,10 +274,8 @@ void MatierePremiere::clearEditorFields(const MatierePremiereEditorWidgets &w)
         w.couleur->clear();
     if (w.statut)
         w.statut->clear();
-    if (w.epaisseur)
-        w.epaisseur->clear();
-    if (w.origine)
-        w.origine->clear();
+    if (w.email)
+        w.email->clear();
     if (w.reserve)
         w.reserve->clear();
     if (w.fournisseurAffiche)
@@ -305,18 +308,14 @@ int MatierePremiere::fillEditorFromTableRow(const MatierePremiereEditorWidgets &
     }
     if (w.couleur)
         w.couleur->setText(itemText(table, row, 5));
-    if (w.epaisseur)
-        w.epaisseur->setText(itemText(table, row, 6));
-    if (w.origine)
-        w.origine->setText(itemText(table, row, 7));
-    if (w.fournisseurAffiche)
-        w.fournisseurAffiche->setText(itemText(table, row, 8));
+    if (w.email)
+        w.email->setText(itemText(table, row, 6));
     if (w.reserve)
-        w.reserve->setText(itemText(table, row, 9));
+        w.reserve->setText(itemText(table, row, 7));
     if (w.prixAffiche)
-        w.prixAffiche->setText(itemText(table, row, 10));
+        w.prixAffiche->setText(itemText(table, row, 8));
     if (w.statut)
-        w.statut->setText(itemText(table, row, 12));
+        w.statut->setText(itemText(table, row, 9));
     return itemText(table, row, 0).toInt();
 }
 
@@ -351,8 +350,8 @@ bool MatierePremiere::ajouter() const
     QSqlQuery q;
     q.prepare(QStringLiteral(
         "INSERT INTO MATIERES_PREMIERES "
-        "(ID, REFERENCE_INTERNE, NOM_CUIR, TYPE_CUIR, GAMME, COULEUR, STATUT, EPAISSEUR, ORIGINE, RESERVE) "
-        "VALUES (:id, :ref, :nom, :typ, :gam, :col, :st, :ep, :or, :re)"));
+        "(ID, REFERENCE_INTERNE, NOM_CUIR, TYPE_CUIR, GAMME, COULEUR, STATUT, EMAIL_CONTACT, RESERVE) "
+        "VALUES (:id, :ref, :nom, :typ, :gam, :col, :st, :em, :re)"));
     q.bindValue(QStringLiteral(":id"), m_id);
     q.bindValue(QStringLiteral(":ref"), m_reference.trimmed());
     q.bindValue(QStringLiteral(":nom"), m_nomCuir.trimmed());
@@ -360,8 +359,7 @@ bool MatierePremiere::ajouter() const
     q.bindValue(QStringLiteral(":gam"), m_gamme.trimmed());
     q.bindValue(QStringLiteral(":col"), m_couleur.trimmed());
     q.bindValue(QStringLiteral(":st"), m_statut.trimmed().isEmpty() ? QStringLiteral("Disponible") : m_statut.trimmed());
-    q.bindValue(QStringLiteral(":ep"), m_epaisseur);
-    q.bindValue(QStringLiteral(":or"), m_origine.trimmed());
+    q.bindValue(QStringLiteral(":em"), m_email.trimmed());
     q.bindValue(QStringLiteral(":re"), m_reserve);
     if (!q.exec()) {
         lastSqlError = q.lastError().text();
@@ -379,7 +377,7 @@ bool MatierePremiere::modifier(int oldId, int newId) const
     QSqlQuery q;
     q.prepare(QStringLiteral(
         "UPDATE MATIERES_PREMIERES SET ID=:nid, REFERENCE_INTERNE=:ref, NOM_CUIR=:nom, TYPE_CUIR=:typ, "
-        "GAMME=:gam, COULEUR=:col, STATUT=:st, EPAISSEUR=:ep, ORIGINE=:or, RESERVE=:re WHERE ID=:oid"));
+        "GAMME=:gam, COULEUR=:col, STATUT=:st, EMAIL_CONTACT=:em, RESERVE=:re WHERE ID=:oid"));
     q.bindValue(QStringLiteral(":nid"), newId);
     q.bindValue(QStringLiteral(":ref"), m_reference.trimmed());
     q.bindValue(QStringLiteral(":nom"), m_nomCuir.trimmed());
@@ -387,8 +385,7 @@ bool MatierePremiere::modifier(int oldId, int newId) const
     q.bindValue(QStringLiteral(":gam"), m_gamme.trimmed());
     q.bindValue(QStringLiteral(":col"), m_couleur.trimmed());
     q.bindValue(QStringLiteral(":st"), m_statut.trimmed().isEmpty() ? QStringLiteral("Disponible") : m_statut.trimmed());
-    q.bindValue(QStringLiteral(":ep"), m_epaisseur);
-    q.bindValue(QStringLiteral(":or"), m_origine.trimmed());
+    q.bindValue(QStringLiteral(":em"), m_email.trimmed());
     q.bindValue(QStringLiteral(":re"), m_reserve);
     q.bindValue(QStringLiteral(":oid"), oldId);
     if (!q.exec()) {

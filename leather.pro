@@ -1,4 +1,4 @@
-QT += sql network printsupport charts
+QT += sql network printsupport charts serialport
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 
 qtHaveModule(location) {
@@ -201,6 +201,7 @@ else: unix:!android: target.path = /opt/$${TARGET}/bin
 
 SOURCES += main.cpp \
            ../../qrcodegen.cpp \
+           firebasemanager.cpp \
            facelogindialog.cpp \
            assistantwindow.cpp \
            busyseasoncalendardialog.cpp \
@@ -231,6 +232,7 @@ SOURCES += main.cpp \
            supplierchartwidgets.cpp
 
 HEADERS += mainwindow.h \
+           firebasemanager.h \
            chatbotreplyformat.h \
            ../../qrcodegen.hpp \
            GoogleCalendarService.h \

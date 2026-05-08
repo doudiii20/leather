@@ -12,6 +12,7 @@ class QDateEdit;
 /// Champs fiche « Employés » (pageEmployes).
 struct EmployeEditorWidgets {
     QLineEdit *cin = nullptr;
+    QLineEdit *idCarte = nullptr;
     QLineEdit *nom = nullptr;
     QLineEdit *prenom = nullptr;
     QComboBox *sexe = nullptr;
@@ -29,6 +30,7 @@ class Employe
 public:
     Employe();
     Employe(const QString &cin,
+            const QString &idCarte,
             const QString &nom,
             const QString &prenom,
             const QString &sexe,
@@ -65,6 +67,7 @@ public:
 
 private:
     QString m_cin;
+    QString m_idCarte;
     QString m_nom;
     QString m_prenom;
     QString m_sexe;

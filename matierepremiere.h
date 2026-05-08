@@ -18,8 +18,7 @@ struct MatierePremiereEditorWidgets {
     QComboBox *gamme = nullptr;
     QLineEdit *couleur = nullptr;
     QLineEdit *statut = nullptr;
-    QLineEdit *epaisseur = nullptr;
-    QLineEdit *origine = nullptr;
+    QLineEdit *email = nullptr;
     QLineEdit *reserve = nullptr;
     QLineEdit *fournisseurAffiche = nullptr;
     QLineEdit *prixAffiche = nullptr;
@@ -38,8 +37,7 @@ public:
                     const QString &gamme,
                     const QString &couleur,
                     const QString &statut,
-                    double epaisseur,
-                    const QString &origine,
+                    const QString &email,
                     int reserve);
 
     int getId() const { return m_id; }
@@ -49,8 +47,7 @@ public:
     QString getGamme() const { return m_gamme; }
     QString getCouleur() const { return m_couleur; }
     QString getStatut() const { return m_statut; }
-    double getEpaisseur() const { return m_epaisseur; }
-    QString getOrigine() const { return m_origine; }
+    QString getEmail() const { return m_email; }
     int getReserve() const { return m_reserve; }
 
     bool isSeuilCritique(int seuil = 10) const { return m_reserve <= seuil; }
@@ -82,8 +79,7 @@ private:
     QString m_gamme;
     QString m_couleur;
     QString m_statut;
-    double m_epaisseur = 0.0;
-    QString m_origine;
+    QString m_email;
     int m_reserve = 0;
 };
 

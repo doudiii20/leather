@@ -28,6 +28,12 @@ private slots:
     void refreshUiState();
 
 private:
+    enum class AppUserPasswordUpdateResult {
+        Updated = 0,
+        NotFound,
+        Failed
+    };
+
     enum class Step {
         EmailEntry = 0,
         CodeVerification,
@@ -70,6 +76,7 @@ private:
     bool ensureEmployePasswordColumn(QString *errorOut) const;
     bool lookupEmployeCinByEmail(const QString &email, QString *cinOut, QString *errorOut) const;
     bool updateEmployePasswordInDatabase(const QString &cin, const QString &plainPassword, QString *errorOut) const;
+    AppUserPasswordUpdateResult updateAppUserPasswordInDatabase(const QString &username, const QString &email, const QString &plainPassword, QString *errorOut) const;
     static bool isValidEmail(const QString &email);
     static QString hashPasswordSha256(const QString &plainPassword);
     static int generateSixDigitCode();

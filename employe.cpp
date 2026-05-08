@@ -96,24 +96,26 @@ static int colFromSearchKey(const QString &key)
     const QString k = key.toLower();
     if (k == QLatin1String("cin"))
         return 0;
-    if (k == QLatin1String("nom"))
+    if (k == QLatin1String("idcarte") || k == QLatin1String("id_carte") || k == QLatin1String("carte"))
         return 1;
-    if (k == QLatin1String("prenom"))
+    if (k == QLatin1String("nom"))
         return 2;
-    if (k == QLatin1String("sexe"))
+    if (k == QLatin1String("prenom"))
         return 3;
-    if (k == QLatin1String("salaire"))
+    if (k == QLatin1String("sexe"))
         return 4;
-    if (k == QLatin1String("date"))
+    if (k == QLatin1String("salaire"))
         return 5;
-    if (k == QLatin1String("tel") || k == QLatin1String("telephone"))
+    if (k == QLatin1String("date"))
         return 6;
-    if (k == QLatin1String("poste"))
+    if (k == QLatin1String("tel") || k == QLatin1String("telephone"))
         return 7;
-    if (k == QLatin1String("adresse"))
+    if (k == QLatin1String("poste"))
         return 8;
-    if (k == QLatin1String("email"))
+    if (k == QLatin1String("adresse"))
         return 9;
+    if (k == QLatin1String("email"))
+        return 10;
     return -1;
 }
 
@@ -122,6 +124,7 @@ static int colFromSearchKey(const QString &key)
 Employe::Employe() = default;
 
 Employe::Employe(const QString &cin,
+                   const QString &idCarte,
                    const QString &nom,
                    const QString &prenom,
                    const QString &sexe,
@@ -132,6 +135,7 @@ Employe::Employe(const QString &cin,
                    const QString &adresse,
                    const QString &email)
     : m_cin(cin)
+    , m_idCarte(idCarte)
     , m_nom(nom)
     , m_prenom(prenom)
     , m_sexe(sexe)
@@ -154,6 +158,7 @@ bool Employe::ensureSchema(QString *errorMessage)
     const QString create = QStringLiteral(
         "BEGIN EXECUTE IMMEDIATE 'CREATE TABLE EMPLOYES ("
         "CIN VARCHAR2(8) PRIMARY KEY, "
+        "ID_CARTE VARCHAR2(50), "
         "NOM VARCHAR2(100) NOT NULL, "
         "PRENOM VARCHAR2(100) NOT NULL, "
         "SEXE VARCHAR2(20) NOT NULL, "
@@ -164,7 +169,15 @@ bool Employe::ensureSchema(QString *errorMessage)
         "ADRESSE VARCHAR2(200) NOT NULL, "
         "EMAIL VARCHAR2(150) NOT NULL)'; "
         "EXCEPTION WHEN OTHERS THEN IF SQLCODE != -955 THEN RAISE; END IF; END;");
-    return execSql(create, errorMessage);
+    if (!execSql(create, errorMessage))
+        return false;
+
+    const QString addIdCarte = QStringLiteral(
+        "BEGIN "
+        "EXECUTE IMMEDIATE 'ALTER TABLE EMPLOYES ADD (ID_CARTE VARCHAR2(50))'; "
+        "EXCEPTION WHEN OTHERS THEN IF SQLCODE != -1430 THEN RAISE; END IF; "
+        "END;");
+    return execSql(addIdCarte, errorMessage);
 }
 
 void Employe::seedDemoIfEmpty(QString *errorMessage)
@@ -185,6 +198,7 @@ void Employe::seedDemoIfEmpty(QString *errorMessage)
         return;
 
     Employe demo(QStringLiteral("12345678"),
+                   QStringLiteral("CARD-001"),
                    QStringLiteral("Ben"),
                    QStringLiteral("Salah"),
                    QStringLiteral("Homme"),
@@ -212,12 +226,14 @@ bool Employe::populateTable(QTableWidget *table, QString *errorMessage)
 
     const bool prevSort = table->isSortingEnabled();
     table->setSortingEnabled(false);
+    if (table->columnCount() < 11)
+        table->setColumnCount(11);
     table->setRowCount(0);
 
     QSqlQuery query(QSqlDatabase::database());
     query.setForwardOnly(true);
     if (!query.exec(QStringLiteral(
-            "SELECT CIN,NOM,PRENOM,SEXE,SALAIRE,TO_CHAR(DATE_EMBAUCHE,'DD/MM/YYYY'),TELEPHONE,POSTE,ADRESSE,EMAIL "
+            "SELECT CIN,NVL(ID_CARTE,''),NOM,PRENOM,SEXE,SALAIRE,TO_CHAR(DATE_EMBAUCHE,'DD/MM/YYYY'),TELEPHONE,POSTE,ADRESSE,EMAIL "
             "FROM EMPLOYES ORDER BY CIN"))) {
         if (errorMessage)
             *errorMessage = query.lastError().text().trimmed();
@@ -228,12 +244,12 @@ bool Employe::populateTable(QTableWidget *table, QString *errorMessage)
     int row = 0;
     while (query.next()) {
         table->insertRow(row);
-        for (int col = 0; col < 10; ++col) {
+        for (int col = 0; col < 11; ++col) {
             const QString val = query.value(col).toString();
-            if (col == 5) {
+            if (col == 6) {
                 const QDate d = QDate::fromString(val, QStringLiteral("dd/MM/yyyy"));
                 table->setItem(row, col, new DateTableItem(val, d));
-            } else if (col == 0 || col == 4 || col == 6) {
+            } else if (col == 0 || col == 5 || col == 7) {
                 table->setItem(row, col, new NumericTableItem(val));
             } else {
                 table->setItem(row, col, new QTableWidgetItem(val));
@@ -323,6 +339,8 @@ void Employe::clearEditor(const EmployeEditorWidgets &w)
 {
     if (w.cin)
         w.cin->clear();
+    if (w.idCarte)
+        w.idCarte->clear();
     if (w.nom)
         w.nom->clear();
     if (w.prenom)
@@ -352,27 +370,29 @@ int Employe::fillEditorFromTableRow(const EmployeEditorWidgets &w, QTableWidget 
 
     if (w.cin)
         w.cin->setText(table->item(row, 0)->text());
+    if (w.idCarte)
+        w.idCarte->setText(table->item(row, 1)->text());
     if (w.nom)
-        w.nom->setText(table->item(row, 1)->text());
+        w.nom->setText(table->item(row, 2)->text());
     if (w.prenom)
-        w.prenom->setText(table->item(row, 2)->text());
+        w.prenom->setText(table->item(row, 3)->text());
     if (w.sexe)
-        w.sexe->setCurrentText(table->item(row, 3)->text());
+        w.sexe->setCurrentText(table->item(row, 4)->text());
     if (w.salaire)
-        w.salaire->setText(table->item(row, 4)->text());
+        w.salaire->setText(table->item(row, 5)->text());
     if (w.dateEmbauche) {
-        const QString ds = table->item(row, 5) ? table->item(row, 5)->text() : QString();
+        const QString ds = table->item(row, 6) ? table->item(row, 6)->text() : QString();
         const QDate d = QDate::fromString(ds, QStringLiteral("dd/MM/yyyy"));
         w.dateEmbauche->setDate(d.isValid() ? d : QDate::currentDate());
     }
     if (w.telephone)
-        w.telephone->setText(table->item(row, 6)->text());
+        w.telephone->setText(table->item(row, 7)->text());
     if (w.poste)
-        w.poste->setText(table->item(row, 7)->text());
+        w.poste->setText(table->item(row, 8)->text());
     if (w.adresse)
-        w.adresse->setText(table->item(row, 8)->text());
+        w.adresse->setText(table->item(row, 9)->text());
     if (w.email)
-        w.email->setText(table->item(row, 9)->text());
+        w.email->setText(table->item(row, 10)->text());
     return 0;
 }
 
@@ -455,9 +475,10 @@ bool Employe::ajouter(QString *errorMessage) const
 {
     QSqlQuery query(QSqlDatabase::database());
     query.prepare(
-        QStringLiteral("INSERT INTO EMPLOYES (CIN,NOM,PRENOM,SEXE,SALAIRE,DATE_EMBAUCHE,TELEPHONE,POSTE,ADRESSE,EMAIL) "
-                       "VALUES (:cin,:nom,:prenom,:sexe,:salaire,:demb,:tel,:poste,:adresse,:email)"));
+        QStringLiteral("INSERT INTO EMPLOYES (CIN,ID_CARTE,NOM,PRENOM,SEXE,SALAIRE,DATE_EMBAUCHE,TELEPHONE,POSTE,ADRESSE,EMAIL) "
+                       "VALUES (:cin,:idCarte,:nom,:prenom,:sexe,:salaire,:demb,:tel,:poste,:adresse,:email)"));
     query.bindValue(QStringLiteral(":cin"), m_cin);
+    query.bindValue(QStringLiteral(":idCarte"), m_idCarte);
     query.bindValue(QStringLiteral(":nom"), m_nom);
     query.bindValue(QStringLiteral(":prenom"), m_prenom);
     query.bindValue(QStringLiteral(":sexe"), m_sexe);
@@ -479,9 +500,10 @@ bool Employe::modifier(QString *errorMessage) const
 {
     QSqlQuery query(QSqlDatabase::database());
     query.prepare(QStringLiteral(
-        "UPDATE EMPLOYES SET NOM=:nom,PRENOM=:prenom,SEXE=:sexe,SALAIRE=:salaire,DATE_EMBAUCHE=:demb,"
+        "UPDATE EMPLOYES SET ID_CARTE=:idCarte,NOM=:nom,PRENOM=:prenom,SEXE=:sexe,SALAIRE=:salaire,DATE_EMBAUCHE=:demb,"
         "TELEPHONE=:tel,POSTE=:poste,ADRESSE=:adresse,EMAIL=:email WHERE CIN=:cin"));
     query.bindValue(QStringLiteral(":cin"), m_cin);
+    query.bindValue(QStringLiteral(":idCarte"), m_idCarte);
     query.bindValue(QStringLiteral(":nom"), m_nom);
     query.bindValue(QStringLiteral(":prenom"), m_prenom);
     query.bindValue(QStringLiteral(":sexe"), m_sexe);

@@ -496,6 +496,84 @@ bool ForgotPasswordDialog::updateEmployePasswordInDatabase(const QString &cin, c
     return true;
 }
 
+ForgotPasswordDialog::AppUserPasswordUpdateResult
+ForgotPasswordDialog::updateAppUserPasswordInDatabase(const QString &username, const QString &email, const QString &plainPassword, QString *errorOut) const
+{
+    if (!m_db.isOpen()) {
+        if (errorOut) {
+            *errorOut = QStringLiteral("Connexion base de données indisponible.");
+        }
+        return AppUserPasswordUpdateResult::Failed;
+    }
+
+    QSqlQuery tableExists(m_db);
+    if (!tableExists.exec(QStringLiteral("SELECT COUNT(*) FROM USER_TABLES WHERE TABLE_NAME = 'APP_USERS'"))
+        || !tableExists.next()) {
+        if (errorOut) {
+            *errorOut = tableExists.lastError().text().trimmed();
+        }
+        return AppUserPasswordUpdateResult::Failed;
+    }
+    if (tableExists.value(0).toInt() <= 0) {
+        if (errorOut) {
+            *errorOut = QStringLiteral("Table APP_USERS introuvable.");
+        }
+        return AppUserPasswordUpdateResult::NotFound;
+    }
+
+    const QString trimmedEmail = email.trimmed();
+    const int atPos = trimmedEmail.indexOf(QLatin1Char('@'));
+    const QString emailLocalPart = (atPos > 0) ? trimmedEmail.left(atPos).trimmed() : QString();
+
+    QSqlQuery updateQuery(m_db);
+    updateQuery.prepare(QStringLiteral(
+        "UPDATE APP_USERS "
+        "SET PASSWORD = :password "
+        "WHERE UPPER(USERNAME) = UPPER(:username) "
+        "OR LOWER(TRIM(EMAIL)) = LOWER(TRIM(:email)) "
+        "OR UPPER(USERNAME) = UPPER(:emailAsUsername) "
+        "OR UPPER(USERNAME) = UPPER(:emailLocalPart)"));
+    updateQuery.bindValue(QStringLiteral(":password"), hashPasswordSha256(plainPassword));
+    updateQuery.bindValue(QStringLiteral(":username"), username.trimmed());
+    updateQuery.bindValue(QStringLiteral(":email"), trimmedEmail);
+    updateQuery.bindValue(QStringLiteral(":emailAsUsername"), trimmedEmail);
+    updateQuery.bindValue(QStringLiteral(":emailLocalPart"), emailLocalPart);
+
+    if (!updateQuery.exec()) {
+        if (errorOut) {
+            *errorOut = updateQuery.lastError().text().trimmed();
+        }
+        return AppUserPasswordUpdateResult::Failed;
+    }
+
+    if (updateQuery.numRowsAffected() <= 0) {
+        // Fallback: ensure an APP_USERS account tied to CIN exists and uses the new password.
+        QSqlQuery mergeQuery(m_db);
+        mergeQuery.prepare(QStringLiteral(
+            "MERGE INTO APP_USERS t "
+            "USING (SELECT :username AS USERNAME, :password AS PASSWORD, :role AS ROLE, :email AS EMAIL FROM DUAL) s "
+            "ON (UPPER(t.USERNAME) = UPPER(s.USERNAME)) "
+            "WHEN MATCHED THEN UPDATE SET t.PASSWORD = s.PASSWORD, t.EMAIL = s.EMAIL "
+            "WHEN NOT MATCHED THEN INSERT (USERNAME, PASSWORD, ROLE, EMAIL) "
+            "VALUES (s.USERNAME, s.PASSWORD, s.ROLE, s.EMAIL)"));
+        mergeQuery.bindValue(QStringLiteral(":username"), username.trimmed());
+        mergeQuery.bindValue(QStringLiteral(":password"), hashPasswordSha256(plainPassword));
+        mergeQuery.bindValue(QStringLiteral(":role"), QStringLiteral("USER"));
+        mergeQuery.bindValue(QStringLiteral(":email"), trimmedEmail);
+
+        if (!mergeQuery.exec()) {
+            if (errorOut) {
+                *errorOut = mergeQuery.lastError().text().trimmed();
+            }
+            return AppUserPasswordUpdateResult::Failed;
+        }
+
+        return AppUserPasswordUpdateResult::Updated;
+    }
+
+    return AppUserPasswordUpdateResult::Updated;
+}
+
 void ForgotPasswordDialog::onConfirmPasswordClicked()
 {
     const QString newPassword = m_newPasswordEdit->text();
@@ -520,10 +598,34 @@ void ForgotPasswordDialog::onConfirmPasswordClicked()
         return;
     }
 
+    if (!m_db.transaction()) {
+        QMessageBox::critical(this, QStringLiteral("Mise à jour échouée"),
+                              QStringLiteral("Impossible de démarrer la transaction de réinitialisation."));
+        return;
+    }
+
     QString dbError;
     if (!updateEmployePasswordInDatabase(m_pendingEmployeeCin, newPassword, &dbError)) {
+        m_db.rollback();
         QMessageBox::critical(this, QStringLiteral("Mise à jour échouée"),
                               QStringLiteral("Impossible de mettre à jour le mot de passe.\n%1").arg(dbError));
+        return;
+    }
+
+    QString appUserError;
+    const AppUserPasswordUpdateResult appUserResult =
+        updateAppUserPasswordInDatabase(m_pendingEmployeeCin, m_pendingEmail, newPassword, &appUserError);
+    if (appUserResult == AppUserPasswordUpdateResult::Failed) {
+        m_db.rollback();
+        QMessageBox::critical(this, QStringLiteral("Mise à jour échouée"),
+                              QStringLiteral("Impossible de mettre à jour le mot de passe de la page login.\n%1").arg(appUserError));
+        return;
+    }
+
+    if (!m_db.commit()) {
+        m_db.rollback();
+        QMessageBox::critical(this, QStringLiteral("Mise à jour échouée"),
+                              QStringLiteral("La transaction a échoué. Aucun changement n'a été appliqué."));
         return;
     }
 

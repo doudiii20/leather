@@ -1,6 +1,5 @@
 #include "facelogindialog.h"
 
-#include <QCoreApplication>
 #include <QDebug>
 #include <QDir>
 #include <QFile>
@@ -10,42 +9,23 @@
 #include <QMessageBox>
 #include <QPixmap>
 #include <QPushButton>
+#include <QVBoxLayout>
+#include <QSerialPort>
+#include <QSerialPortInfo>
+#include <QRegularExpression>
 #include <QStandardPaths>
 #include <QTimer>
-#include <QVBoxLayout>
 
-#include <algorithm>
-#include <vector>
-
-#ifdef LEATHER_HAVE_OPENCV
+#if defined(LEATHER_HAVE_OPENCV)
 #include "faceauthmanager.h"
-#include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/objdetect.hpp>
 #include <opencv2/videoio.hpp>
 #endif
 
-namespace {
-constexpr int kMinStableFrames = 12;
-constexpr int kVideoWidth = 640;
-constexpr int kVideoHeight = 480;
-
-static QStringList cascadeCandidatePaths(const QString &resourceExtractedPath)
-{
-    QStringList paths;
-    if (!resourceExtractedPath.isEmpty())
-        paths << resourceExtractedPath;
-
-    const QString appDir = QCoreApplication::applicationDirPath();
-    paths << (appDir + QStringLiteral("/haarcascade_frontalface_alt.xml"));
-    paths << (appDir + QStringLiteral("/haarcascade_frontalface_default.xml"));
-    return paths;
-}
-} // namespace
-
 bool FaceLoginDialog::isOpenCvAvailable()
 {
-#ifdef LEATHER_HAVE_OPENCV
+#if defined(LEATHER_HAVE_OPENCV)
     return true;
 #else
     return false;
@@ -56,127 +36,69 @@ FaceLoginDialog::FaceLoginDialog(QWidget *parent)
     : QDialog(parent)
 {
     setupUi();
-
-#ifndef LEATHER_HAVE_OPENCV
-    m_statusLabel->setText(
-        QStringLiteral("OpenCV n'est pas active dans ce build. Definissez OPENCV_DIR dans leather.pro "
-                       "et recompilez (voir commentaires dans le fichier .pro)."));
-    m_btnConnect->setEnabled(false);
-    return;
-#else
-    QString cascadeErr;
-    if (!loadCascadeToTempFile(&cascadeErr)) {
-        m_statusLabel->setText(QStringLiteral("Erreur cascade : %1").arg(cascadeErr));
-        m_btnConnect->setEnabled(false);
-        m_btnStart->setEnabled(false);
-        m_btnStop->setEnabled(false);
-        return;
-    }
+#if defined(LEATHER_HAVE_OPENCV)
+    m_statusLabel->setText(QStringLiteral("Cliquez sur Demarrer, puis Se connecter pour verifier le visage."));
 
     m_timer = new QTimer(this);
+    m_timer->setInterval(33);
     connect(m_timer, &QTimer::timeout, this, &FaceLoginDialog::onFrameTick);
     connect(m_btnStart, &QPushButton::clicked, this, &FaceLoginDialog::onStartRecognition);
     connect(m_btnStop, &QPushButton::clicked, this, &FaceLoginDialog::onStopRecognition);
-    m_btnStop->setEnabled(false);
-
-    if (FaceAuthManager::isEnrolled())
-        m_statusLabel->setText(QStringLiteral(
-            "Modele existant detecte. Cliquez sur Demarrer reconnaissance, "
-            "ou Re-enregistrer le visage admin pour recalibrer."));
-    else
-        m_statusLabel->setText(QStringLiteral(
-            "Aucun modele enregistre : centrez votre visage, attendez la stabilisation, puis cliquez sur "
-            "« Enregistrer le visage admin »."));
-
     connect(m_btnConnect, &QPushButton::clicked, this, [this]() {
-        QString err;
-        double conf = 0.;
-        if (!m_hasValidFace || m_lastGrayFrame.empty()) {
-            QMessageBox::warning(this, QStringLiteral("Reconnaissance faciale"),
-                                 QStringLiteral("Aucun visage stable detecte. Repositionnez-vous."));
+        if (!m_hasValidFace || m_lastGrayFrame.empty() || m_lastFaceRect.width < 20 || m_lastFaceRect.height < 20) {
+            QMessageBox::warning(this, QStringLiteral("Face ID"), QStringLiteral("Aucun visage valide detecte."));
             return;
         }
-        if (!FaceAuthManager::verify(m_lastGrayFrame, m_lastFaceRect, &conf, &err)) {
-            QMessageBox::warning(this, QStringLiteral("Reconnaissance faciale"), err);
+        double score = 0.0;
+        QString err;
+        if (!FaceAuthManager::verify(m_lastGrayFrame, m_lastFaceRect, &score, &err)) {
+            const QString msg = err.isEmpty() ? QStringLiteral("Visage non reconnu.") : err;
+            QMessageBox::warning(this, QStringLiteral("Face ID"), msg);
             return;
         }
         accept();
     });
+#else
+    m_statusLabel->setText(QStringLiteral(
+        "Face ID desactive (OpenCV non configure)."));
 
-    connect(m_btnEnroll, &QPushButton::clicked, this, [this]() {
-        QString err;
-        if (!m_hasValidFace || m_lastGrayFrame.empty()) {
-            QMessageBox::warning(this, QStringLiteral("Enregistrement"),
-                                 QStringLiteral("Aucun visage stable detecte. Repositionnez-vous."));
-            return;
-        }
-        if (FaceAuthManager::enroll(m_lastGrayFrame, m_lastFaceRect, &err)) {
-            QMessageBox::information(this, QStringLiteral("Enregistrement"),
-                                    QStringLiteral("Visage administrateur enregistre. Vous pouvez vous connecter."));
-            m_statusLabel->setText(QStringLiteral("Modele pret — placez votre visage puis cliquez sur Se connecter."));
-        } else {
-            QMessageBox::warning(this, QStringLiteral("Enregistrement"), err);
-        }
-        updateFaceAuthButtons();
-    });
-
-    connect(m_btnClearModel, &QPushButton::clicked, this, [this]() {
-        if (QMessageBox::question(
-                this,
-                QStringLiteral("Supprimer le modèle"),
-                QStringLiteral("Supprimer le visage enregistré sur cette machine ?\n"
-                               "Vous devrez en enregistrer un nouveau pour vous connecter par la caméra."),
-                QMessageBox::Yes | QMessageBox::No,
-                QMessageBox::No)
-            != QMessageBox::Yes) {
-            return;
-        }
-        QString err;
-        if (!FaceAuthManager::clearEnrollment(&err)) {
-            QMessageBox::warning(this, QStringLiteral("Supprimer le modèle"), err);
-            return;
-        }
-        QMessageBox::information(this, QStringLiteral("Supprimer le modèle"),
-                                 QStringLiteral("Modèle supprimé. Démarrez la reconnaissance et enregistrez un nouveau visage admin."));
-        m_statusLabel->setText(QStringLiteral(
-            "Aucun modèle : démarrez la caméra, stabilisez le visage, puis cliquez sur « Enregistrer le visage admin »."));
-        updateFaceAuthButtons();
-    });
-
-    updateFaceAuthButtons();
+    m_btnStart->setEnabled(false);
+    m_btnStop->setEnabled(false);
+    m_btnConnect->setEnabled(false);
 #endif
 }
 
 FaceLoginDialog::~FaceLoginDialog()
 {
-#ifdef LEATHER_HAVE_OPENCV
+    if (m_timer)
+        m_timer->stop();
     cleanupCapture();
-#endif
+    closeRfidReader();
 }
 
 void FaceLoginDialog::setupUi()
 {
-    setWindowTitle(QStringLiteral("Connexion — reconnaissance faciale"));
+    setWindowTitle(QStringLiteral("Connexion"));
     setModal(true);
-    resize(680, 560);
+    resize(520, 260);
 
     m_videoLabel = new QLabel(this);
-    m_videoLabel->setMinimumSize(kVideoWidth, kVideoHeight);
+    m_videoLabel->setMinimumSize(420, 120);
     m_videoLabel->setAlignment(Qt::AlignCenter);
     m_videoLabel->setStyleSheet(QStringLiteral("QLabel { background: #101010; color: #bbb; }"));
-    m_videoLabel->setText(QStringLiteral("Flux video"));
+    m_videoLabel->setText(QStringLiteral("Face ID desactive"));
 
     m_statusLabel = new QLabel(this);
     m_statusLabel->setWordWrap(true);
 
-    m_btnStart = new QPushButton(QStringLiteral("Démarrer reconnaissance"), this);
+    m_btnStart = new QPushButton(QStringLiteral("Demarrer"), this);
     m_btnStart->setCursor(Qt::PointingHandCursor);
     m_btnStart->setStyleSheet(QStringLiteral(
         "QPushButton { background-color: #1e5a3a; color: #fff; border: none; border-radius: 4px; "
         "padding: 8px 18px; font-weight: bold; }"
         "QPushButton:hover { background-color: #256b46; }"));
 
-    m_btnStop = new QPushButton(QStringLiteral("Arrêter"), this);
+    m_btnStop = new QPushButton(QStringLiteral("Arreter"), this);
     m_btnStop->setCursor(Qt::PointingHandCursor);
     m_btnStop->setStyleSheet(QStringLiteral(
         "QPushButton { background-color: #7b2f2f; color: #fff; border: none; border-radius: 4px; "
@@ -193,36 +115,11 @@ void FaceLoginDialog::setupUi()
         "QPushButton:hover { background-color: #70380a; }"
         "QPushButton:disabled { background-color: #b8a894; color: #ede6d7; }"));
 
-#ifdef LEATHER_HAVE_OPENCV
-    m_btnEnroll = new QPushButton(QStringLiteral("Enregistrer le visage admin"), this);
-    m_btnEnroll->setEnabled(false);
-    m_btnEnroll->setCursor(Qt::PointingHandCursor);
-    m_btnEnroll->setStyleSheet(QStringLiteral(
-        "QPushButton { background-color: #1e5a3a; color: #fff; border: none; border-radius: 4px; "
-        "padding: 8px 18px; font-weight: bold; }"
-        "QPushButton:hover { background-color: #256b46; }"
-        "QPushButton:disabled { background-color: #a8b8ae; color: #eef4ef; }"));
-
-    m_btnClearModel = new QPushButton(QStringLiteral("Supprimer le modèle"), this);
-    m_btnClearModel->setEnabled(false);
-    m_btnClearModel->setCursor(Qt::PointingHandCursor);
-    m_btnClearModel->setToolTip(QStringLiteral("Supprime le visage enregistré sur ce PC. Vous pourrez en enregistrer un nouveau."));
-    m_btnClearModel->setStyleSheet(QStringLiteral(
-        "QPushButton { background-color: #fff5f0; color: #8a2b0a; border: 1px solid #d4a090; border-radius: 4px; "
-        "padding: 8px 18px; font-weight: bold; }"
-        "QPushButton:hover { background-color: #ffe8dd; border-color: #b87055; }"
-        "QPushButton:disabled { background-color: #e8e4e0; color: #b0a8a0; border-color: #d0ccc8; }"));
-#endif
-
     m_btnCancel = new QPushButton(QStringLiteral("Annuler"), this);
     m_btnCancel->setCursor(Qt::PointingHandCursor);
 
     auto *btnRow = new QHBoxLayout();
     btnRow->addStretch();
-#ifdef LEATHER_HAVE_OPENCV
-    btnRow->addWidget(m_btnEnroll);
-    btnRow->addWidget(m_btnClearModel);
-#endif
     btnRow->addWidget(m_btnStart);
     btnRow->addWidget(m_btnStop);
     btnRow->addWidget(m_btnCancel);
@@ -236,197 +133,249 @@ void FaceLoginDialog::setupUi()
     connect(m_btnCancel, &QPushButton::clicked, this, &QDialog::reject);
 }
 
+bool FaceLoginDialog::initRfidReader(QString *errorMessage)
+{
+    closeRfidReader();
+
+    m_rfidSerial = new QSerialPort(this);
+    m_rfidSerial->setBaudRate(QSerialPort::Baud9600);
+    m_rfidSerial->setDataBits(QSerialPort::Data8);
+    m_rfidSerial->setParity(QSerialPort::NoParity);
+    m_rfidSerial->setStopBits(QSerialPort::OneStop);
+    m_rfidSerial->setFlowControl(QSerialPort::NoFlowControl);
+
+    QStringList candidates;
+    candidates << QStringLiteral("COM3")
+               << QStringLiteral("COM4")
+               << QStringLiteral("COM5")
+               << QStringLiteral("COM6")
+               << QStringLiteral("COM7")
+               << QStringLiteral("COM8")
+               << QStringLiteral("COM9");
+    const auto ports = QSerialPortInfo::availablePorts();
+    for (const QSerialPortInfo &portInfo : ports) {
+        const QString haystack =
+            (portInfo.description() + QLatin1Char(' ') + portInfo.manufacturer()).toLower();
+        if (haystack.contains(QStringLiteral("arduino"))
+            || haystack.contains(QStringLiteral("usb"))
+            || haystack.contains(QStringLiteral("ch340"))
+            || haystack.contains(QStringLiteral("cp210"))) {
+            if (!candidates.contains(portInfo.portName()))
+                candidates << portInfo.portName();
+        }
+    }
+    for (const QSerialPortInfo &portInfo : ports) {
+        if (!candidates.contains(portInfo.portName()))
+            candidates << portInfo.portName();
+    }
+
+    for (const QString &portName : candidates) {
+        m_rfidSerial->setPortName(portName);
+        if (m_rfidSerial->open(QIODevice::ReadOnly)) {
+            connect(m_rfidSerial, &QSerialPort::readyRead, this, &FaceLoginDialog::onRfidReadyRead);
+            qDebug() << "[FaceLogin] Lecteur RFID connecte sur" << portName;
+            return true;
+        }
+    }
+
+    if (errorMessage)
+        *errorMessage = QStringLiteral("Lecteur RFID indisponible (port serie non ouvert).");
+    qDebug() << "[FaceLogin] Echec ouverture lecteur RFID:" << m_rfidSerial->errorString();
+    closeRfidReader();
+    return false;
+}
+
+void FaceLoginDialog::closeRfidReader()
+{
+    if (!m_rfidSerial)
+        return;
+    if (m_rfidSerial->isOpen())
+        m_rfidSerial->close();
+    m_rfidSerial->deleteLater();
+    m_rfidSerial = nullptr;
+    m_rfidBuffer.clear();
+}
+
+QString FaceLoginDialog::normalizeUidText(const QString &text) const
+{
+    static const QRegularExpression rx(QStringLiteral("\\b([0-9A-Fa-f]{1,2})\\b"));
+    QStringList bytes;
+    auto it = rx.globalMatch(text);
+    while (it.hasNext()) {
+        const auto m = it.next();
+        const QString byteHex = m.captured(1).toUpper().rightJustified(2, QLatin1Char('0'));
+        bytes << byteHex;
+    }
+    return bytes.join(QStringLiteral(" "));
+}
+
+void FaceLoginDialog::updateAuthStateUi()
+{
+    m_btnConnect->setEnabled(m_hasValidFace);
+}
+
+void FaceLoginDialog::onRfidReadyRead()
+{
+    if (!m_rfidSerial)
+        return;
+
+    m_rfidBuffer += m_rfidSerial->readAll();
+    while (true) {
+        const int nlIdx = m_rfidBuffer.indexOf('\n');
+        if (nlIdx < 0)
+            break;
+
+        const QByteArray rawLine = m_rfidBuffer.left(nlIdx);
+        m_rfidBuffer.remove(0, nlIdx + 1);
+
+        const QString line = QString::fromUtf8(rawLine).trimmed();
+        if (line.isEmpty())
+            continue;
+
+        const QString uid = normalizeUidText(line);
+        if (uid.isEmpty())
+            continue;
+
+        if (uid == m_expectedRfidUid)
+            qDebug() << "[FaceLogin] UID RFID autorise detecte:" << uid;
+        else
+            qDebug() << "[FaceLogin] UID RFID refuse detecte:" << uid;
+    }
+}
+
 bool FaceLoginDialog::startCamera(QString *errorMessage)
 {
-#ifndef LEATHER_HAVE_OPENCV
+#if !defined(LEATHER_HAVE_OPENCV)
     Q_UNUSED(errorMessage);
     return false;
 #else
     cleanupCapture();
-    m_capture = new cv::VideoCapture();
-    m_classifier = new cv::CascadeClassifier();
 
-    auto *cap = static_cast<cv::VideoCapture *>(m_capture);
-    cap->open(0, cv::CAP_ANY);
+    if (!loadCascadeToTempFile(errorMessage))
+        return false;
+
+    auto *cap = new cv::VideoCapture(0);
     if (!cap->isOpened()) {
-        qDebug() << "[FaceLogin] Camera non detectee (index 0).";
-        if (errorMessage)
-            *errorMessage = QStringLiteral("Impossible d'ouvrir la camera (index 0).");
-        delete static_cast<cv::CascadeClassifier *>(m_classifier);
-        m_classifier = nullptr;
         delete cap;
-        m_capture = nullptr;
+        if (errorMessage)
+            *errorMessage = QStringLiteral("Impossible d'ouvrir la camera.");
         return false;
     }
-    cap->set(cv::CAP_PROP_FRAME_WIDTH, kVideoWidth);
-    cap->set(cv::CAP_PROP_FRAME_HEIGHT, kVideoHeight);
+    m_capture = cap;
 
-    auto *cc = static_cast<cv::CascadeClassifier *>(m_classifier);
-    bool cascadeLoaded = false;
-    QString loadedCascadePath;
-    const QStringList candidates = cascadeCandidatePaths(m_cascadeTempPath);
-    for (const QString &path : candidates) {
-        if (path.isEmpty() || !QFile::exists(path))
-            continue;
-        if (cc->load(path.toStdString())) {
-            cascadeLoaded = true;
-            loadedCascadePath = path;
-            break;
-        }
-    }
-    if (!cascadeLoaded) {
-        qDebug() << "[FaceLogin] Echec chargement cascade. Candidats:" << candidates;
+    auto *classifier = new cv::CascadeClassifier;
+    if (!classifier->load(m_cascadeTempPath.toStdString())) {
+        delete classifier;
+        cleanupCapture();
         if (errorMessage)
-            *errorMessage = QStringLiteral("Chargement du classificateur Haar impossible (fichier XML introuvable/invalide).");
-        cap->release();
-        delete cap;
-        m_capture = nullptr;
-        delete cc;
-        m_classifier = nullptr;
+            *errorMessage = QStringLiteral("Cascade visage introuvable.");
         return false;
     }
-    qDebug() << "[FaceLogin] Cascade chargee depuis:" << loadedCascadePath;
-
-    m_stableFaceFrames = 0;
-    m_verifyCooldownFrames = 0;
-    m_hasValidFace = false;
-    if (m_timer)
-        m_timer->start(33);
+    m_classifier = classifier;
     return true;
 #endif
 }
 
 bool FaceLoginDialog::loadCascadeToTempFile(QString *errorMessage)
 {
-    QDir().mkpath(QDir::tempPath());
+#if !defined(LEATHER_HAVE_OPENCV)
+    Q_UNUSED(errorMessage);
+    return false;
+#else
+    const QString dstDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QDir().mkpath(dstDir);
+    const QString dstPath = dstDir + QStringLiteral("/haarcascade_frontalface_alt.xml");
 
-    QFile f(QStringLiteral(":/opencv/haarcascade_frontalface_alt.xml"));
-    if (!f.open(QIODevice::ReadOnly)) {
-        qDebug() << "[FaceLogin] Ressource cascade introuvable :/opencv/haarcascade_frontalface_alt.xml";
+    QFile in(QStringLiteral(":/opencv/haarcascade_frontalface_alt.xml"));
+    if (!in.open(QIODevice::ReadOnly)) {
         if (errorMessage)
-            *errorMessage = QStringLiteral("ressource introuvable :/opencv/haarcascade_frontalface_alt.xml");
+            *errorMessage = QStringLiteral("Ressource cascade OpenCV manquante.");
         return false;
     }
-    const QByteArray data = f.readAll();
-    f.close();
-
-    QStringList targetDirs;
-    const QString appDataRoot = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    if (!appDataRoot.isEmpty())
-        targetDirs << (appDataRoot + QStringLiteral("/RoyalLeather/cache"));
-    targetDirs << (QDir::tempPath() + QStringLiteral("/RoyalLeather/cache"));
-
-    for (const QString &dirPath : targetDirs) {
-        QDir dir(dirPath);
-        if (!dir.exists() && !QDir().mkpath(dirPath))
-            continue;
-
-        const QString cascadePath = dir.filePath(QStringLiteral("haarcascade_frontalface_alt.xml"));
-        QFile out(cascadePath);
-        if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate))
-            continue;
-
-        const qint64 written = out.write(data);
-        out.close();
-        if (written != data.size())
-            continue;
-
-        m_cascadeTempPath = cascadePath;
-        qDebug() << "[FaceLogin] Cascade extraite vers:" << m_cascadeTempPath;
-        return true;
+    QFile out(dstPath);
+    if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        if (errorMessage)
+            *errorMessage = QStringLiteral("Impossible de copier la cascade OpenCV.");
+        return false;
     }
-
-    if (errorMessage) {
-        *errorMessage = QStringLiteral("impossible d'ecrire le fichier cascade (verifiez droits d'ecriture AppData/TEMP)");
-    }
-    qDebug() << "[FaceLogin] Impossible d'ecrire la cascade dans AppData/TEMP";
-    return false;
+    out.write(in.readAll());
+    out.close();
+    m_cascadeTempPath = dstPath;
+    return true;
+#endif
 }
 
 #if defined(LEATHER_HAVE_OPENCV)
 void FaceLoginDialog::updateFaceAuthButtons()
 {
-    const bool enrolled = FaceAuthManager::isEnrolled();
-    if (m_btnEnroll) {
-        m_btnEnroll->setVisible(true);
-        m_btnEnroll->setText(
-            enrolled ? QStringLiteral("Re-enregistrer le visage admin")
-                     : QStringLiteral("Enregistrer le visage admin"));
-    }
-    const bool stable = m_stableFaceFrames >= kMinStableFrames;
-    if (m_btnEnroll)
-        m_btnEnroll->setEnabled(stable && m_hasValidFace);
-    if (m_btnClearModel)
-        m_btnClearModel->setEnabled(enrolled);
-    m_btnConnect->setEnabled(enrolled && stable && m_hasValidFace);
+    updateAuthStateUi();
 }
 #endif
 
 void FaceLoginDialog::cleanupCapture()
 {
-#ifdef LEATHER_HAVE_OPENCV
-    if (m_timer) {
-        m_timer->stop();
-    }
+#if defined(LEATHER_HAVE_OPENCV)
     if (m_capture) {
-        static_cast<cv::VideoCapture *>(m_capture)->release();
-        delete static_cast<cv::VideoCapture *>(m_capture);
+        auto *cap = static_cast<cv::VideoCapture *>(m_capture);
+        if (cap->isOpened())
+            cap->release();
+        delete cap;
         m_capture = nullptr;
     }
     if (m_classifier) {
         delete static_cast<cv::CascadeClassifier *>(m_classifier);
         m_classifier = nullptr;
     }
+    m_lastGrayFrame.release();
+    m_lastFaceRect = cv::Rect();
+    m_hasValidFace = false;
+    updateAuthStateUi();
 #endif
 }
 
 void FaceLoginDialog::onStartRecognition()
 {
-#ifndef LEATHER_HAVE_OPENCV
-    return;
+#if !defined(LEATHER_HAVE_OPENCV)
+    m_statusLabel->setText(QStringLiteral("Face ID desactive."));
 #else
     QString err;
     if (!startCamera(&err)) {
-        m_statusLabel->setText(err);
-        m_btnConnect->setEnabled(false);
+        m_statusLabel->setText(err.isEmpty() ? QStringLiteral("Echec camera.") : err);
         return;
     }
     m_btnStart->setEnabled(false);
     m_btnStop->setEnabled(true);
-    m_statusLabel->setText(FaceAuthManager::isEnrolled()
-                               ? QStringLiteral("Reconnaissance en cours...")
-                               : QStringLiteral("Modele absent : enregistrez d'abord le visage admin."));
-    updateFaceAuthButtons();
+    m_statusLabel->setText(QStringLiteral("Camera active. Regardez la camera."));
+    if (m_timer)
+        m_timer->start();
 #endif
 }
 
 void FaceLoginDialog::onStopRecognition()
 {
-#ifndef LEATHER_HAVE_OPENCV
-    return;
+#if !defined(LEATHER_HAVE_OPENCV)
+    m_statusLabel->setText(QStringLiteral("Aucune reconnaissance en cours."));
 #else
+    if (m_timer)
+        m_timer->stop();
     cleanupCapture();
-    m_videoLabel->setText(QStringLiteral("Flux arrêté"));
     m_btnStart->setEnabled(true);
     m_btnStop->setEnabled(false);
-    m_btnConnect->setEnabled(false);
-    m_statusLabel->setText(QStringLiteral("Reconnaissance arrêtée."));
-    m_stableFaceFrames = 0;
-    m_hasValidFace = false;
-    updateFaceAuthButtons();
+    m_statusLabel->setText(QStringLiteral("Camera arretee."));
+    m_videoLabel->setText(QStringLiteral("Camera arretee"));
 #endif
 }
 
 void FaceLoginDialog::onFrameTick()
 {
-#ifndef LEATHER_HAVE_OPENCV
+#if !defined(LEATHER_HAVE_OPENCV)
     return;
 #else
-    auto *cap = static_cast<cv::VideoCapture *>(m_capture);
-    auto *cc = static_cast<cv::CascadeClassifier *>(m_classifier);
-    if (!cap || !cc || !cap->isOpened())
+    if (!m_capture || !m_classifier)
         return;
 
+    auto *cap = static_cast<cv::VideoCapture *>(m_capture);
+    auto *classifier = static_cast<cv::CascadeClassifier *>(m_classifier);
     cv::Mat frame;
     if (!cap->read(frame) || frame.empty())
         return;
@@ -436,57 +385,22 @@ void FaceLoginDialog::onFrameTick()
     cv::equalizeHist(gray, gray);
 
     std::vector<cv::Rect> faces;
-    cc->detectMultiScale(gray, faces, 1.1, 3, 0, cv::Size(48, 48));
-
-    const bool enrolled = FaceAuthManager::isEnrolled();
-
-    if (!faces.empty()) {
-        const cv::Rect best = *std::max_element(
-            faces.begin(), faces.end(),
-            [](const cv::Rect &a, const cv::Rect &b) { return a.area() < b.area(); });
-        for (const auto &r : faces)
-            cv::rectangle(frame, r, cv::Scalar(60, 60, 60), 1);
-        cv::rectangle(frame, best, cv::Scalar(80, 220, 120), 2);
-
-        ++m_stableFaceFrames;
-        m_lastGrayFrame = gray.clone();
-        m_lastFaceRect = best;
-        m_hasValidFace = true;
-
-        if (m_stableFaceFrames < kMinStableFrames) {
-            m_statusLabel->setText(QStringLiteral("Visage detecte (%1/%2)...")
-                                       .arg(qMin(m_stableFaceFrames, kMinStableFrames))
-                                       .arg(kMinStableFrames));
-        } else if (enrolled) {
-            m_statusLabel->setText(QStringLiteral("Reconnaissance prete — vérification automatique..."));
-            if (m_verifyCooldownFrames <= 0) {
-                QString err;
-                double conf = 0.;
-                if (FaceAuthManager::verify(m_lastGrayFrame, m_lastFaceRect, &conf, &err)) {
-                    m_statusLabel->setText(QStringLiteral("Utilisateur reconnu. Connexion automatique..."));
-                    accept();
-                    return;
-                }
-                m_statusLabel->setText(QStringLiteral("Utilisateur non reconnu."));
-                m_verifyCooldownFrames = 20;
-            }
-        } else {
-            m_statusLabel->setText(QStringLiteral("Visage stable — cliquez sur Enregistrer le visage admin."));
-        }
+    classifier->detectMultiScale(gray, faces, 1.1, 4, 0, cv::Size(80, 80));
+    m_hasValidFace = !faces.empty();
+    if (m_hasValidFace) {
+        m_lastFaceRect = faces.front();
+        m_lastGrayFrame = gray;
+        cv::rectangle(frame, m_lastFaceRect, cv::Scalar(0, 200, 0), 2);
+        m_statusLabel->setText(QStringLiteral("Visage detecte. Cliquez Se connecter."));
     } else {
-        m_stableFaceFrames = 0;
-        m_hasValidFace = false;
-        m_statusLabel->setText(QStringLiteral("Aucun visage detecte — centrez-vous face a la camera."));
+        m_statusLabel->setText(QStringLiteral("Aucun visage detecte."));
     }
-
-    if (m_verifyCooldownFrames > 0)
-        --m_verifyCooldownFrames;
-
-    updateFaceAuthButtons();
+    updateAuthStateUi();
 
     cv::Mat rgb;
     cv::cvtColor(frame, rgb, cv::COLOR_BGR2RGB);
-    QImage img(rgb.data, rgb.cols, rgb.rows, static_cast<int>(rgb.step), QImage::Format_RGB888);
-    m_videoLabel->setPixmap(QPixmap::fromImage(img.copy()));
+    const QImage img(rgb.data, rgb.cols, rgb.rows, static_cast<int>(rgb.step), QImage::Format_RGB888);
+    m_videoLabel->setPixmap(QPixmap::fromImage(img.copy()).scaled(
+        m_videoLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
 #endif
 }

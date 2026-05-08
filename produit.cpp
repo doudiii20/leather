@@ -41,11 +41,12 @@ QString Produit::packStyle(const QString &qualite,
                            const QString &etat,
                            const QDate &dateFab,
                            const QString &typeDesign,
-                           const QString &styleUtilisateur)
+                           const QString &styleUtilisateur,
+                           const QString &numeroTelephone)
 {
     const QString d = dateFab.isValid() ? dateFab.toString(Qt::ISODate) : QString();
-    QString s = QStringLiteral("Q:%1|E:%2|D:%3|TD:%4|S:%5")
-                    .arg(qualite, etat, d, typeDesign, styleUtilisateur);
+    QString s = QStringLiteral("Q:%1|E:%2|D:%3|TD:%4|N:%5|S:%6")
+                    .arg(qualite, etat, d, typeDesign, numeroTelephone, styleUtilisateur);
     // Compatibilite Oracle: la colonne PRODUITS.STYLE est souvent definie en VARCHAR2(50).
     // On tronque preventivement pour eviter ORA-12899 (value too large for column).
     if (s.length() > 50)
@@ -157,6 +158,7 @@ Produit::Produit(int id_,
                  QString nom_produit_,
                  QString categorie_,
                  QString type_cuir_,
+                 QString numero_telephone_,
                  QString qualite_,
                  int quantite_stock_,
                  QString etat_produit_,
@@ -167,6 +169,7 @@ Produit::Produit(int id_,
     , nom_produit(nom_produit_)
     , categorie(categorie_)
     , type_cuir(type_cuir_)
+    , numero_telephone(numero_telephone_)
     , qualite(qualite_)
     , quantite_stock(quantite_stock_)
     , etat_produit(etat_produit_)
@@ -194,7 +197,7 @@ bool Produit::ajouter()
     }
 
     const QString sku = QStringLiteral("SKU-%1").arg(id);
-    const QString styleDb = packStyle(qualite, etat_produit, date_fabrication, type_design, style);
+    const QString styleDb = packStyle(qualite, etat_produit, date_fabrication, type_design, style, numero_telephone);
     const int actif = (etat_produit.contains(QStringLiteral("Défectueux"), Qt::CaseInsensitive)
                        || etat_produit.contains(QStringLiteral("Vendu"), Qt::CaseInsensitive))
         ? 0
@@ -285,7 +288,7 @@ bool Produit::modifier(int oldId, int newId)
     }
 
     const QString sku = QStringLiteral("SKU-%1").arg(newId);
-    const QString styleDb = packStyle(qualite, etat_produit, date_fabrication, type_design, style);
+    const QString styleDb = packStyle(qualite, etat_produit, date_fabrication, type_design, style, numero_telephone);
     const int actif = (etat_produit.contains(QStringLiteral("Défectueux"), Qt::CaseInsensitive)
                        || etat_produit.contains(QStringLiteral("Vendu"), Qt::CaseInsensitive))
         ? 0
@@ -429,7 +432,7 @@ QSqlQueryModel *Produit::afficher()
 
     model->setQuery(QStringLiteral(
                           "SELECT P.ID, %1, %2, %3, "
-                          "'' AS QUALITE, "
+                          "'' AS NUMERO_TELEPHONE, "
                           "NVL(S.QTE_DISPONIBLE, 0) AS QUANTITE_STOCK, "
                           "%4, "
                           "CAST(NULL AS DATE) AS DATE_FABRICATION, "
@@ -454,6 +457,8 @@ void Produit::clearEditorFields(const ProduitEditorWidgets &w)
         w.categorie->clear();
     if (w.typeCuir)
         w.typeCuir->clear();
+    if (w.numeroTelephone)
+        w.numeroTelephone->clear();
     if (w.quantiteStock)
         w.quantiteStock->clear();
     if (w.style)
@@ -498,13 +503,21 @@ int Produit::fillEditorFromTableRow(const ProduitEditorWidgets &w, QTableWidget 
         w.typeCuir->setText(cell(3));
 
     const QString packedStyle = cell(9);
-    QString pq, ptd, ps;
+    QString pq, ptd, ps, pnum;
     QDate pdf;
     unpackPackedStyle(packedStyle, &pq, nullptr, &pdf, &ptd, &ps);
+    const QStringList packedParts = packedStyle.split(QLatin1Char('|'));
+    for (const QString &p : packedParts) {
+        if (p.startsWith(QStringLiteral("N:")))
+            pnum = p.mid(2).trimmed();
+    }
 
-    const QString qualiteAff = cell(4).isEmpty() ? pq : cell(4);
-    if (w.qualite && !qualiteAff.isEmpty())
-        w.qualite->setCurrentText(qualiteAff);
+    const QString numeroAff = cell(4).isEmpty() ? pnum : cell(4);
+    if (w.numeroTelephone)
+        w.numeroTelephone->setText(numeroAff);
+
+    if (w.qualite && !pq.isEmpty())
+        w.qualite->setCurrentText(pq);
 
     bool qtyOk = false;
     const int qty = cell(5).toInt(&qtyOk);
@@ -576,6 +589,17 @@ bool Produit::populateProductTable(QTableWidget *table, QString *errorMessage)
     const int n = model->rowCount();
     for (int r = 0; r < n; ++r) {
         table->insertRow(r);
+        const QString packedStyleRaw = model->data(model->index(r, 9)).toString();
+        QString extractedPhone;
+        if (!packedStyleRaw.isEmpty()) {
+            const QStringList packedParts = packedStyleRaw.split(QLatin1Char('|'));
+            for (const QString &p : packedParts) {
+                if (p.startsWith(QStringLiteral("N:"))) {
+                    extractedPhone = p.mid(2).trimmed();
+                    break;
+                }
+            }
+        }
         for (int c = 0; c < 11; ++c) {
             const QVariant v = model->data(model->index(r, c));
             QString txt;
@@ -602,6 +626,8 @@ bool Produit::populateProductTable(QTableWidget *table, QString *errorMessage)
                 const int pid = parseProductIdText(v.toString());
                 table->setItem(r, c, new QTableWidgetItem(pid > 0 ? QString::number(pid) : txt.trimmed()));
             } else {
+                if (c == 4)
+                    txt = extractedPhone;
                 table->setItem(r, c, new QTableWidgetItem(txt));
             }
         }
@@ -656,93 +682,6 @@ int Produit::searchFilterModeFromComboText(const QString &comboCurrentText)
     return 0;
 }
 
-QString Produit::defectAlertsPlainText(QString *errorMessage)
-{
-    if (errorMessage)
-        errorMessage->clear();
-
-    if (!connexionBdOuverte()) {
-        return QStringLiteral("Connexion base fermee : impossible de charger les alertes.");
-    }
-
-    const QString nomPhys = CommerceStore::produitsLibelleColumnPhysical();
-    const QString nomCol = QStringLiteral("P.%1").arg(nomPhys);
-    const bool hasActif = CommerceStore::produitsColumnExists(QStringLiteral("ACTIF"));
-    const bool hasStyle = CommerceStore::produitsColumnExists(QStringLiteral("STYLE"));
-
-    QStringList whereParts;
-    whereParts << QStringLiteral("NVL(S.QTE_DISPONIBLE, 0) <= NVL(S.SEUIL_ALERTE, 5)");
-    if (hasActif)
-        whereParts << QStringLiteral("NVL(P.ACTIF, 1) = 0");
-    if (hasStyle) {
-        whereParts << QStringLiteral("INSTR(NVL(P.STYLE, ' '), 'fectueux') > 0");
-        whereParts << QStringLiteral("INSTR(UPPER(NVL(P.STYLE, ' ')), 'DEFECT') > 0");
-    }
-
-    const QString whereClause = whereParts.join(QStringLiteral(" OR "));
-
-    QString actifSelect = QStringLiteral(", 1 AS ACTIF");
-    if (hasActif)
-        actifSelect = QStringLiteral(", NVL(P.ACTIF, 1) AS ACTIF");
-
-    QString styleSelect = QStringLiteral(", CAST(' ' AS VARCHAR2(400)) AS STYLE");
-    if (hasStyle)
-        styleSelect = QStringLiteral(", NVL(P.STYLE, ' ') AS STYLE");
-
-    const QString sql = QStringLiteral(
-                           "SELECT %1 AS NOM, P.ID, NVL(S.QTE_DISPONIBLE, 0) AS QTE, NVL(S.SEUIL_ALERTE, 5) AS SEUIL%2%3 "
-                           "FROM PRODUITS P "
-                           "LEFT JOIN STOCK S ON S.ID_PRODUIT = P.ID "
-                           "WHERE (%4) "
-                           "ORDER BY P.ID")
-                           .arg(nomCol, actifSelect, styleSelect, whereClause);
-
-    QSqlQuery query;
-    if (!query.exec(sql)) {
-        if (errorMessage)
-            *errorMessage = query.lastError().text();
-        return QString();
-    }
-
-    QStringList lines;
-    lines << QStringLiteral("--- Alertes production / stock (%1) ---")
-                 .arg(QDateTime::currentDateTime().toString(QStringLiteral("dd/MM/yyyy HH:mm")));
-    int n = 0;
-    while (query.next()) {
-        ++n;
-        const QString nom = query.value(0).toString();
-        const int id = query.value(1).toInt();
-        const int qte = query.value(2).toInt();
-        const int seuil = query.value(3).toInt();
-        const int actif = query.value(4).toInt();
-        const QString style = query.value(5).toString();
-
-        QStringList reasons;
-        if (qte <= seuil)
-            reasons << QStringLiteral("stock faible (%1 / seuil %2)").arg(QString::number(qte), QString::number(seuil));
-        if (hasActif && actif == 0)
-            reasons << QStringLiteral("produit inactif (ACTIF = 0)");
-        if (hasStyle
-            && (style.contains(QStringLiteral("fectueux"), Qt::CaseInsensitive)
-                || style.contains(QStringLiteral("defect"), Qt::CaseInsensitive)))
-            reasons << QStringLiteral("mention defaut (STYLE)");
-
-        if (reasons.isEmpty())
-            reasons << QStringLiteral("condition d'alerte en base");
-
-        lines << QStringLiteral("• ID %1 — %2 : %3")
-                     .arg(QString::number(id), nom, reasons.join(QStringLiteral(" ; ")));
-    }
-
-    if (n == 0) {
-        lines << QString();
-        lines << QStringLiteral("Aucune alerte : stocks au-dessus des seuils, produits actifs, pas de trace "
-                                "\"Défectueux\" dans STYLE.");
-    }
-
-    return lines.join(QStringLiteral("\n"));
-}
-
 QString Produit::chatbotContextFromProductTable(QTableWidget *table, int maxRows)
 {
     if (!table)
@@ -750,7 +689,7 @@ QString Produit::chatbotContextFromProductTable(QTableWidget *table, int maxRows
 
     QStringList lines;
     lines << QStringLiteral("Contexte catalogue (lignes visibles du tableau produits) :");
-    lines << QStringLiteral("Colonnes : ID | nom | categorie | type cuir | qualite | stock | etat");
+    lines << QStringLiteral("Colonnes : ID | nom | categorie | type cuir | numero telephone | stock | etat");
     int n = 0;
     for (int r = 0; r < table->rowCount() && n < maxRows; ++r) {
         if (table->isRowHidden(r))

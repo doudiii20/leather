@@ -749,13 +749,8 @@
     </message>
     <message>
         <location filename="../mainwindow.ui" line="3929" />
-        <source>alerte des défauts de production</source>
-        <translation>production defects alert</translation>
-    </message>
-    <message>
-        <location filename="../mainwindow.ui" line="3995" />
-        <source>voir alerte</source>
-        <translation>see alert</translation>
+        <source>Production</source>
+        <translation>Production</translation>
     </message>
     <message>
         <location filename="../mainwindow.ui" line="4004" />
@@ -842,8 +837,8 @@
     </message>
     <message>
         <location filename="../mainwindow.ui" line="4475" />
-        <source>Épaisseur</source>
-        <translation>Thickness</translation>
+        <source>Email</source>
+        <translation>Email</translation>
     </message>
     <message>
         <location filename="../mainwindow.ui" line="4511" />
@@ -877,15 +872,15 @@
     <message>
         <location filename="../mainwindow.ui" line="4582" />
         <location filename="../mainwindow.ui" line="4871" />
-        <source>Epaisseur</source>
-        <translation>Thickness</translation>
+        <source>Email</source>
+        <translation>Email</translation>
     </message>
     <message>
         <location filename="../mainwindow.ui" line="4587" />
         <location filename="../mainwindow.ui" line="4895" />
         <location filename="../mainwindow.ui" line="4905" />
-        <source>Origine</source>
-        <translation>Origin</translation>
+        <source>Contact fournisseur</source>
+        <translation>Supplier contact</translation>
     </message>
     <message>
         <location filename="../mainwindow.ui" line="4592" />
@@ -950,8 +945,8 @@
     </message>
     <message>
         <location filename="../mainwindow.ui" line="4881" />
-        <source>Épaisseur (mm)</source>
-        <translation>Thickness (mm)</translation>
+        <source>Email</source>
+        <translation>Email</translation>
     </message>
     <message>
         <location filename="../mainwindow.ui" line="4926" />

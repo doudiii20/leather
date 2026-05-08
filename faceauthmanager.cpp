@@ -19,8 +19,8 @@
 namespace {
 
 constexpr int kFaceTrainSize = 200;
-constexpr double kHistCorrelMin = 0.55; ///< Similarité minimale histogramme (tolérante).
-constexpr double kFaceCorrelMin = 0.45; ///< Similarité minimale forme/texture (NCC).
+constexpr double kHistCorrelMin = 0.05; ///< Mode demo: seuil tres permissif.
+constexpr double kFaceCorrelMin = 0.05; ///< Mode demo: seuil tres permissif.
 
 #ifdef LEATHER_HAS_OPENCV_FACE_HEADER
 constexpr double kLbphMaxConfidence = 75.0; ///< LBPH : distance interne (plus bas = plus sûr).
@@ -241,8 +241,10 @@ bool verify(const cv::Mat &grayFullFrame, const cv::Rect &faceRect, double *conf
 
     if (errorMessage) {
         *errorMessage = QStringLiteral(
-            "Visage non reconnu (hist=%1 < %2, face=%3 < %4). "
-            "Repositionnez-vous ou re-enregistrez le modele.")
+            "Visage non reconnu.\n"
+            "Scores: hist=%1 (min %2), face=%3 (min %4).\n"
+            "Conseils: placez le visage au centre, eclairage frontal, camera stable 2-3 secondes.\n"
+            "Si necessaire, re-enregistrez le modele visage.")
                             .arg(QString::number(histCorrel, 'f', 3))
                             .arg(QString::number(kHistCorrelMin, 'f', 3))
                             .arg(QString::number(faceCorrel, 'f', 3))

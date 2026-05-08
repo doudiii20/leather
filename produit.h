@@ -16,6 +16,7 @@ struct ProduitEditorWidgets {
     QLineEdit *nomProduit = nullptr;
     QLineEdit *categorie = nullptr;
     QLineEdit *typeCuir = nullptr;
+    QLineEdit *numeroTelephone = nullptr;
     QLineEdit *quantiteStock = nullptr;
     QLineEdit *style = nullptr;
     QComboBox *qualite = nullptr;
@@ -33,6 +34,7 @@ public:
             QString nom_produit,
             QString categorie,
             QString type_cuir,
+            QString numero_telephone,
             QString qualite,
             int quantite_stock,
             QString etat_produit,
@@ -70,8 +72,6 @@ public:
     /// Tolere les formats ODBC/Oracle (ex. "12.0") pour l'ID affiche dans le tableau.
     static int parseProductIdText(const QString &text);
 
-    /// Texte pour la zone alertes (PRODUITS + STOCK). errorMessage rempli si requete SQL invalide.
-    static QString defectAlertsPlainText(QString *errorMessage = nullptr);
     /// Contexte texte pour le chatbot (lignes visibles du tableau).
     static QString chatbotContextFromProductTable(QTableWidget *table, int maxRows = 40);
 
@@ -82,12 +82,14 @@ private:
                               const QString &etat,
                               const QDate &dateFab,
                               const QString &typeDesign,
-                              const QString &styleUtilisateur);
+                              const QString &styleUtilisateur,
+                              const QString &numeroTelephone);
 
     int id = 0;
     QString nom_produit;
     QString categorie;
     QString type_cuir;
+    QString numero_telephone;
     QString qualite;
     int quantite_stock = 0;
     QString etat_produit;
