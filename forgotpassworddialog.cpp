@@ -32,7 +32,7 @@ ForgotPasswordDialog::ForgotPasswordDialog(QSqlDatabase db, QWidget *parent)
     , m_db(db)
     , m_resendTimer(new QTimer(this))
 {
-    setWindowTitle(QStringLiteral("Mot de passe oublie (Employes)"));
+    setWindowTitle(QStringLiteral("Mot de passe oublié (employés)"));
     setModal(true);
     resize(500, 340);
 
@@ -86,7 +86,7 @@ void ForgotPasswordDialog::buildUi()
     auto *codeLayout = new QFormLayout(m_codeGroup);
     m_codeInfoLabel = new QLabel(QStringLiteral("Entrez le code à 6 chiffres envoyé par e-mail."), m_codeGroup);
     m_codeInfoLabel->setWordWrap(true);
-    m_blockedLabel = new QLabel(QStringLiteral("Compte temporairement bloque."), m_codeGroup);
+    m_blockedLabel = new QLabel(QStringLiteral("Compte temporairement bloqué."), m_codeGroup);
     m_blockedLabel->setStyleSheet(QStringLiteral("color: #b00020; font-weight: 700;"));
     m_blockedLabel->setVisible(false);
     m_codeEdit = new QLineEdit(m_codeGroup);
@@ -178,7 +178,7 @@ QString ForgotPasswordDialog::employeeTableName(QString *errorOut) const
 {
     if (!m_db.isOpen()) {
         if (errorOut) {
-            *errorOut = QStringLiteral("Connexion base de donnees indisponible.");
+            *errorOut = QStringLiteral("Connexion base de données indisponible.");
         }
         return QString();
     }
@@ -235,9 +235,9 @@ void ForgotPasswordDialog::refreshUiState()
     m_resendCodeButton->setEnabled(m_currentStep != Step::EmailEntry && !m_isSendInProgress && m_resendSecondsLeft <= 0 && !blocked);
     if (blocked) {
         const int left = QDateTime::currentDateTime().secsTo(m_blockTime);
-        m_resendTimerLabel->setText(QStringLiteral("Trop de tentatives. Verification bloquee pendant %1 s.").arg(qMax(0, left)));
+        m_resendTimerLabel->setText(QStringLiteral("Trop de tentatives. Vérification bloquée pendant %1 s.").arg(qMax(0, left)));
         if (m_blockedLabel)
-            m_blockedLabel->setText(QStringLiteral("Compte temporairement bloque (%1 s restantes).").arg(qMax(0, left)));
+            m_blockedLabel->setText(QStringLiteral("Compte temporairement bloqué (%1 s restantes).").arg(qMax(0, left)));
     } else if (m_resendSecondsLeft > 0) {
         m_resendTimerLabel->setText(QStringLiteral("Vous pouvez renvoyer dans %1 s.").arg(m_resendSecondsLeft));
     } else {
@@ -304,7 +304,7 @@ bool ForgotPasswordDialog::ensureEmployePasswordColumn(QString *errorOut) const
 {
     if (!m_db.isOpen()) {
         if (errorOut)
-            *errorOut = QStringLiteral("Connexion base de donnees indisponible.");
+            *errorOut = QStringLiteral("Connexion base de données indisponible.");
         return false;
     }
 
@@ -547,7 +547,8 @@ ForgotPasswordDialog::updateAppUserPasswordInDatabase(const QString &username, c
     }
 
     if (updateQuery.numRowsAffected() <= 0) {
-        // Fallback: ensure an APP_USERS account tied to CIN exists and uses the new password.
+        // Si aucun compte APP_USERS n'est lie a l'e-mail, on force un compte
+        // login coherent base sur le CIN (username) de l'employe.
         QSqlQuery mergeQuery(m_db);
         mergeQuery.prepare(QStringLiteral(
             "MERGE INTO APP_USERS t "
@@ -594,7 +595,7 @@ void ForgotPasswordDialog::onConfirmPasswordClicked()
     QString schemaErr;
     if (!ensureEmployePasswordColumn(&schemaErr)) {
         QMessageBox::critical(this, QStringLiteral("Schema employes"),
-                              QStringLiteral("Impossible de preparer la colonne PASSWORD_HASH.\n%1").arg(schemaErr));
+                              QStringLiteral("Impossible de préparer la colonne PASSWORD_HASH.\n%1").arg(schemaErr));
         return;
     }
 
@@ -629,7 +630,11 @@ void ForgotPasswordDialog::onConfirmPasswordClicked()
         return;
     }
 
-    QMessageBox::information(this, QStringLiteral("Succès"),
-                             QStringLiteral("Votre mot de passe a été réinitialisé avec succès."));
+    QMessageBox::information(
+        this,
+        QStringLiteral("Succès"),
+        QStringLiteral("Votre mot de passe a été réinitialisé avec succès.\n"
+                       "Nom d'utilisateur à utiliser : %1")
+            .arg(m_pendingEmployeeCin));
     accept();
 }

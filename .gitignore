@@ -82,6 +82,9 @@ CMakeLists.txt.user*
 .uic/
 /build*/
 
+# Stock API (npm)
+stock-api/node_modules/
+
 # Copie locale pour déploiement Netlify (regénérée par public-survey/preparer_et_ouvrir_netlify.bat)
 public-survey/satisfaction_avis_client.html
 

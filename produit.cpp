@@ -29,7 +29,7 @@ int Produit::parseProductIdText(const QString &text)
 
 namespace {
 const QString kMsgConnexionFermee = QStringLiteral(
-    "Connexion base de donnees fermee. Verifiez le DSN ODBC, l'utilisateur et le mot de passe.");
+    "Connexion base de données fermée. Vérifiez le DSN ODBC, l'utilisateur et le mot de passe.");
 
 bool connexionBdOuverte()
 {
@@ -192,7 +192,7 @@ bool Produit::ajouter()
     }
 
     if (idExisteDeja(id)) {
-        lastSqlError = QStringLiteral("ID %1 existe deja. Choisir un autre ID.").arg(id);
+        lastSqlError = QStringLiteral("ID %1 existe déjà. Choisir un autre ID.").arg(id);
         return false;
     }
 
@@ -283,7 +283,7 @@ bool Produit::modifier(int oldId, int newId)
     }
 
     if (newId != oldId && idExisteDeja(newId)) {
-        lastSqlError = QStringLiteral("ID %1 existe deja.").arg(newId);
+        lastSqlError = QStringLiteral("ID %1 existe déjà.").arg(newId);
         return false;
     }
 

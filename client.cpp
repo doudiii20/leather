@@ -251,7 +251,7 @@ bool Client::validerClient(const ClientData &client, QString *errorMessage)
 bool Client::ajouter(ClientData &client, QString *errorMessage)
 {
     if (!QSqlDatabase::database().isOpen()) {
-        if (errorMessage) *errorMessage = "Connexion base de donnees fermee. Verifiez le DSN ODBC, l'utilisateur et le mot de passe.";
+        if (errorMessage) *errorMessage = "Connexion base de données fermée. Vérifiez le DSN ODBC, l'utilisateur et le mot de passe.";
         return false;
     }
     if (!ensureSchema(errorMessage)) return false;
@@ -263,11 +263,11 @@ bool Client::ajouter(ClientData &client, QString *errorMessage)
     checkId.prepare("SELECT COUNT(*) FROM CLIENT WHERE ID = :id");
     checkId.bindValue(":id", client.id);
     if (!checkId.exec() || !checkId.next()) {
-        if (errorMessage) *errorMessage = "Verification de l'ID impossible: " + checkId.lastError().text();
+        if (errorMessage) *errorMessage = "Vérification de l'ID impossible : " + checkId.lastError().text();
         return false;
     }
     if (checkId.value(0).toInt() > 0) {
-        if (errorMessage) *errorMessage = "ID deja utilise. Veuillez saisir un autre ID.";
+        if (errorMessage) *errorMessage = "ID déjà utilisé. Veuillez saisir un autre ID.";
         return false;
     }
 
@@ -307,11 +307,11 @@ bool Client::ajouter(ClientData &client, QString *errorMessage)
         if (errorMessage) {
             const QString sqlErr = query.lastError().text().trimmed();
             if (sqlErr.contains("ORA-00001", Qt::CaseInsensitive)) {
-                *errorMessage = "Doublon detecte: cet ID (ou un autre champ unique) existe deja. Utilisez un autre ID.";
+                *errorMessage = "Doublon détecté : cet ID (ou un autre champ unique) existe déjà. Utilisez un autre ID.";
             } else if (!sqlErr.isEmpty()) {
                 *errorMessage = sqlErr;
             } else {
-                *errorMessage = "Insertion client impossible. Verifiez que l'ID n'existe pas deja et que la table CLIENT est accessible.";
+                *errorMessage = "Insertion client impossible. Vérifiez que l'ID n'existe pas déjà et que la table CLIENT est accessible.";
             }
         }
         return false;

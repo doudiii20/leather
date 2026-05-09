@@ -290,7 +290,7 @@ void FournisseurManager::setupConnections()
                 return;
             }
             if (exists) {
-                QMessageBox::warning(nullptr, QStringLiteral("Fournisseur"), QStringLiteral("Code deja pris."));
+                QMessageBox::warning(nullptr, QStringLiteral("Fournisseur"), QStringLiteral("Code déjà pris."));
                 return;
             }
             const QString codeAffiche = d.code.trimmed().isEmpty() ? m_editCode : d.code.trimmed();
@@ -327,7 +327,7 @@ void FournisseurManager::setupConnections()
             return;
         }
         if (exists) {
-            QMessageBox::warning(nullptr, QStringLiteral("Fournisseur"), QStringLiteral("Code deja pris."));
+            QMessageBox::warning(nullptr, QStringLiteral("Fournisseur"), QStringLiteral("Code déjà pris."));
             return;
         }
         if (!ajouterDb(d, &err)) {

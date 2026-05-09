@@ -1121,7 +1121,8 @@ MainWindow::MainWindow(QWidget *parent)
         refreshFournisseurDashboard();
         geocodePendingFournisseurs();
     } else {
-        QMessageBox::warning(this, "Fournisseurs", "Module fournisseurs desactive: connexion base de donnees fermee.");
+        QMessageBox::warning(this, QStringLiteral("Fournisseurs"),
+                             QStringLiteral("Module fournisseurs désactivé : connexion base de données fermée."));
     }
 
     loadClients();
@@ -1269,13 +1270,13 @@ void MainWindow::setupFournisseurDashboardBlock()
     // Retouche 1: labels metier fournisseurs (affichage proche du projet ami).
     if (ui->labelCIN_2) ui->labelCIN_2->setText("Code partenaire");
     if (ui->labelNom_2) ui->labelNom_2->setText("Raison sociale");
-    if (ui->labelPrenom_2) ui->labelPrenom_2->setText("Score fiabilite");
+    if (ui->labelPrenom_2) ui->labelPrenom_2->setText("Score fiabilité");
     if (ui->labelSexe_2) ui->labelSexe_2->setText("Email achats");
     if (ui->labelSalaire_2) ui->labelSalaire_2->setText("Zone logistique");
     if (ui->labelDateEmbauche_2) ui->labelDateEmbauche_2->setText("SLA livraison (jours)");
     if (ui->lineEditCIN_2) ui->lineEditCIN_2->setPlaceholderText("ex: FRN-001");
     if (ui->lineEditNom_2) ui->lineEditNom_2->setPlaceholderText("ex: Leather Supply Pro");
-    if (ui->lineEditPrenom_2) ui->lineEditPrenom_2->setPlaceholderText("0 a 100");
+    if (ui->lineEditPrenom_2) ui->lineEditPrenom_2->setPlaceholderText("0 à 100");
     if (ui->lineEdit) ui->lineEdit->setPlaceholderText("contact@fournisseur.com");
     if (ui->lineEditEmail_2) ui->lineEditEmail_2->setPlaceholderText("ex: Maghreb / Europe");
     if (ui->lineEdit_2) ui->lineEdit_2->setPlaceholderText("ex: 5");
@@ -2523,7 +2524,7 @@ QString MainWindow::buildFournisseurAiContext() const
         lines << rowValues.join(QStringLiteral(" | "));
     }
     if (rowCount > maxRows)
-        lines << QStringLiteral("... %1 autres fournisseurs non affiches").arg(rowCount - maxRows);
+        lines << QStringLiteral("… %1 autres fournisseurs non affichés").arg(rowCount - maxRows);
 
     if (ui->lineEditChat_2) {
         const QString userExtra = ui->lineEditChat_2->text().trimmed();
@@ -2708,16 +2709,16 @@ void MainWindow::connectSidebar()
         setActiveButton(ui->btnMpremieres);
         if (!ensureDbOpenForProduits()) {
             const QString detail = db.lastError().text().trimmed();
-            QMessageBox::warning(this, QStringLiteral("Matieres premieres"),
-                                  QStringLiteral("Connexion Oracle impossible. Verifiez le DSN ODBC (projet_cuir), "
+            QMessageBox::warning(this, QStringLiteral("Matières premières"),
+                                  QStringLiteral("Connexion Oracle impossible. Vérifiez le DSN ODBC (projet_cuir), "
                                                  "l'utilisateur et le mot de passe.")
                                       + (detail.isEmpty() ? QString() : QStringLiteral("\n\n") + detail));
             return;
         }
         QString merr;
         if (!MatierePremiere::ensureSchema(&merr)) {
-            QMessageBox::critical(this, QStringLiteral("Matieres premieres"),
-                                  QStringLiteral("Preparation du schema MATIERES_PREMIERES :\n%1").arg(merr));
+            QMessageBox::critical(this, QStringLiteral("Matières premières"),
+                                  QStringLiteral("Préparation du schéma MATIERES_PREMIERES :\n%1").arg(merr));
             return;
         }
         // Evite un ecran vide a l'ouverture: on repart d'un etat filtre neutre.
@@ -2751,7 +2752,7 @@ void MainWindow::connectSidebar()
         if (!ensureDbOpenForProduits()) {
             const QString detail = db.lastError().text().trimmed();
             QMessageBox::warning(this, QStringLiteral("Produits"),
-                                  QStringLiteral("Connexion Oracle impossible. Verifiez le DSN ODBC (projet_cuir), "
+                                  QStringLiteral("Connexion Oracle impossible. Vérifiez le DSN ODBC (projet_cuir), "
                                                  "l'utilisateur et le mot de passe.")
                                       + (detail.isEmpty() ? QString() : QStringLiteral("\n\n") + detail));
             return;
@@ -2759,7 +2760,7 @@ void MainWindow::connectSidebar()
         QString perr;
         if (!CommerceStore::ensureSchema(&perr)) {
             QMessageBox::critical(this, QStringLiteral("Produits"),
-                                  QStringLiteral("Schema commerce (PRODUITS / STOCK) :\n%1").arg(perr));
+                                  QStringLiteral("Schéma commerce (PRODUITS / STOCK) :\n%1").arg(perr));
             return;
         }
         CommerceStore::seedDemoCatalogIfEmpty(&perr);
@@ -3080,7 +3081,7 @@ void MainWindow::applyProfileDisplayFromSettings()
     if (!name.isEmpty() && ui->headerUserLabel)
         ui->headerUserLabel->setText(name);
 
-    // Synchronise l’e-mail du profil Paramètres avec APP_USERS pour « mot de passe oublie ».
+    // Synchronise l’e-mail du profil Paramètres avec APP_USERS pour « mot de passe oublié ».
     if (!m_isAuthenticated || !db.isOpen() || !ui->lineEdit_5)
         return;
     const QString u = ui->lineEdit_5->text().trimmed();
@@ -3104,7 +3105,7 @@ void MainWindow::onPasswordChangeFromSettings(const QString &username, const QSt
     QString authErr;
     if (!ensureAuthSchema(&authErr)) {
         QMessageBox::critical(this, QStringLiteral("Paramètres"),
-                              QStringLiteral("Impossible de preparer APP_USERS:\n%1").arg(authErr));
+                              QStringLiteral("Impossible de préparer APP_USERS:\n%1").arg(authErr));
         return;
     }
     if (!validateLoginCredentials(username, oldPassword)) {
@@ -4237,8 +4238,8 @@ void MainWindow::processFaceRfidLine(const QString &line)
                 6000);
         if (err.isEmpty()) {
             QMessageBox::warning(this,
-                                 QStringLiteral("Acces non autorise"),
-                                 QStringLiteral("Acces refuse.\nCette carte RFID n'est pas autorisee pour cet espace."));
+                                 QStringLiteral("Accès non autorisé"),
+                                 QStringLiteral("Accès refusé.\nCette carte RFID n'est pas autorisée pour cet espace."));
         }
         return;
     }
@@ -4318,17 +4319,6 @@ bool MainWindow::validateLoginCredentials(const QString &username, const QString
     const QString stored = q.value(0).toString().trimmed();
     if (stored.compare(providedHash, Qt::CaseInsensitive) == 0)
         return true;
-
-    // Migration transparente: ancien mot de passe en clair -> hash SHA-256.
-    if (stored == password) {
-        QSqlQuery upd(db);
-        upd.prepare(QStringLiteral(
-            "UPDATE APP_USERS SET PASSWORD=:p WHERE UPPER(USERNAME)=UPPER(:u)"));
-        upd.bindValue(QStringLiteral(":p"), providedHash);
-        upd.bindValue(QStringLiteral(":u"), normalizedUser);
-        upd.exec();
-        return true;
-    }
     return false;
 }
 
@@ -4339,19 +4329,19 @@ void MainWindow::on_btnAjouter_8_clicked()
 
     if (!ensureDbOpenForProduits()) {
         QMessageBox::warning(this, QStringLiteral("Connexion"),
-                             QStringLiteral("Connexion Oracle indisponible. Verifiez le DSN ODBC projet_cuir."));
+                             QStringLiteral("Connexion Oracle indisponible. Vérifiez le DSN ODBC projet_cuir."));
         return;
     }
 
     QString authErr;
     if (!ensureAuthSchema(&authErr)) {
         QMessageBox::critical(this, QStringLiteral("Connexion"),
-                              QStringLiteral("Impossible de preparer la table APP_USERS:\n%1").arg(authErr));
+                              QStringLiteral("Impossible de préparer la table APP_USERS:\n%1").arg(authErr));
         return;
     }
     if (!ensureDefaultAdminUser(&authErr)) {
         QMessageBox::critical(this, QStringLiteral("Connexion"),
-                              QStringLiteral("Impossible de preparer le compte admin:\n%1").arg(authErr));
+                              QStringLiteral("Impossible de préparer le compte admin:\n%1").arg(authErr));
         return;
     }
 
@@ -4372,7 +4362,7 @@ void MainWindow::on_btnAjouter_8_clicked()
     if (m_bodyStack)
         m_bodyStack->setCurrentIndex(0);
     updateShellChromeVisibility();
-    QMessageBox::information(this, QStringLiteral("Connexion"), QStringLiteral("Connexion reussie."));
+    QMessageBox::information(this, QStringLiteral("Connexion"), QStringLiteral("Connexion réussie."));
 }
 
 void MainWindow::on_btnRfidLogin_clicked()
@@ -4406,7 +4396,7 @@ void MainWindow::onFaceLoginRequested()
     finishFaceIdLoginSession();
     if (statusBar())
         statusBar()->showMessage(
-            QStringLiteral("Visage reconnu. Connexion Face ID reussie."),
+            QStringLiteral("Visage reconnu. Connexion Face ID réussie."),
             8000);
 }
 
@@ -4438,12 +4428,12 @@ void MainWindow::onRfidLoginRequested()
                 ? m_doorSerialPort->portName()
                 : QStringLiteral("N/A");
         statusBar()->showMessage(
-            QStringLiteral("Mode RFID active (port %1). Presentez votre carte RFID.").arg(portLabel),
+            QStringLiteral("Mode RFID actif (port %1). Présentez votre carte RFID.").arg(portLabel),
             8000);
     }
     QMessageBox::information(this,
                              QStringLiteral("Authentification RFID"),
-                             QStringLiteral("Mode RFID active.\nVeuillez presenter votre carte RFID devant le lecteur."));
+                             QStringLiteral("Mode RFID actif.\nVeuillez présenter votre carte RFID devant le lecteur."));
 }
 
 void MainWindow::initDoorSerialPort()
@@ -4540,13 +4530,17 @@ void MainWindow::onDoorSerialReadyRead()
     if (chunk.isEmpty())
         return;
     m_doorSerialBuffer += chunk;
+#ifdef QT_DEBUG
     qDebug() << "[DoorSerial][raw]" << QString::fromUtf8(chunk).trimmed();
+#endif
 
     auto processLine = [this](const QString &line) {
         if (line.isEmpty())
             return;
 
+#ifdef QT_DEBUG
         qDebug() << "[DoorSerial]" << line;
+#endif
 
         const QString upper = line.toUpper();
         if (!m_waitingRfidAfterFace)
@@ -4563,7 +4557,7 @@ void MainWindow::onDoorSerialReadyRead()
                 m_faceRfidTimeoutTimer->stop();
             m_facePendingEmployeId = -1;
             if (m_facePendingEmployeNom.isEmpty())
-                m_facePendingEmployeNom = QStringLiteral("Employe RFID");
+                m_facePendingEmployeNom = QStringLiteral("Employé RFID");
             finishFaceIdLoginSession();
             return;
         }
@@ -4574,9 +4568,9 @@ void MainWindow::onDoorSerialReadyRead()
             || upper.contains(QStringLiteral("CARD_DENY"))) {
             logDoorAccessEvent(QStringLiteral("DENY"), QString(), line);
             if (statusBar())
-                statusBar()->showMessage(QStringLiteral("Carte RFID refusee."), 6000);
-            QMessageBox::warning(this, QStringLiteral("Acces non autorise"),
-                                 QStringLiteral("Acces refuse.\nCette carte RFID n'est pas autorisee pour cet espace."));
+                statusBar()->showMessage(QStringLiteral("Carte RFID refusée."), 6000);
+            QMessageBox::warning(this, QStringLiteral("Accès non autorisé"),
+                                 QStringLiteral("Accès refusé.\nCette carte RFID n'est pas autorisée pour cet espace."));
             return;
         }
 
@@ -4646,7 +4640,7 @@ void MainWindow::onFaceRfidTimeout()
     m_facePendingEmployeId = -1;
     m_facePendingEmployeNom.clear();
     QMessageBox::warning(this, QStringLiteral("Connexion"),
-                         QStringLiteral("Aucune carte RFID valide detectee dans le delai. Recommencez."));
+                         QStringLiteral("Aucune carte RFID valide détectée dans le délai. Réessayez."));
 }
 
 void MainWindow::finishFaceIdLoginSession()
@@ -4655,18 +4649,18 @@ void MainWindow::finishFaceIdLoginSession()
     if (ui->headerUserLabel)
         ui->headerUserLabel->setText(
             m_facePendingEmployeNom.isEmpty()
-                ? (m_faceStepValidated ? QStringLiteral("Administrateur (Face+RFID)")
+                ? (m_faceStepValidated ? QStringLiteral("Administrateur (Face ID)")
                                        : QStringLiteral("Administrateur (RFID)"))
-                : (m_faceStepValidated ? QStringLiteral("%1 (Face+RFID)").arg(m_facePendingEmployeNom)
+                : (m_faceStepValidated ? QStringLiteral("%1 (Face ID)").arg(m_facePendingEmployeNom)
                                        : QStringLiteral("%1 (RFID)").arg(m_facePendingEmployeNom)));
     applyProfileDisplayFromSettings();
     if (m_bodyStack)
         m_bodyStack->setCurrentIndex(0);
     updateShellChromeVisibility();
     const QString msg = m_facePendingEmployeNom.isEmpty()
-        ? (m_faceStepValidated ? QStringLiteral("Connexion Face ID reussie.")
-                               : QStringLiteral("Connexion RFID reussie."))
-        : QStringLiteral("Bonjour %1,\nVotre pointage a ete enregistre avec succes.").arg(m_facePendingEmployeNom);
+        ? (m_faceStepValidated ? QStringLiteral("Connexion Face ID réussie.")
+                               : QStringLiteral("Connexion RFID réussie."))
+        : QStringLiteral("Bonjour %1,\nVotre pointage a été enregistré avec succès.").arg(m_facePendingEmployeNom);
     QMessageBox::information(this, QStringLiteral("Connexion"), msg);
     m_faceStepValidated = false;
 }
@@ -4675,14 +4669,14 @@ void MainWindow::on_btnSignUp_clicked()
 {
     if (!ensureDbOpenForProduits()) {
         QMessageBox::warning(this, QStringLiteral("Inscription"),
-                             QStringLiteral("Connexion Oracle indisponible. Verifiez le DSN ODBC projet_cuir."));
+                             QStringLiteral("Connexion Oracle indisponible. Vérifiez le DSN ODBC projet_cuir."));
         return;
     }
 
     QString authErr;
     if (!ensureAuthSchema(&authErr)) {
         QMessageBox::critical(this, QStringLiteral("Inscription"),
-                              QStringLiteral("Impossible de preparer la table APP_USERS:\n%1").arg(authErr));
+                              QStringLiteral("Impossible de préparer la table APP_USERS:\n%1").arg(authErr));
         return;
     }
 
@@ -4698,7 +4692,7 @@ void MainWindow::on_btnSignUp_clicked()
         return;
     if (username.size() < 3) {
         QMessageBox::warning(this, QStringLiteral("Inscription"),
-                             QStringLiteral("Le nom d'utilisateur doit contenir au moins 3 caracteres."));
+                             QStringLiteral("Le nom d'utilisateur doit contenir au moins 3 caractères."));
         return;
     }
 
@@ -4713,7 +4707,7 @@ void MainWindow::on_btnSignUp_clicked()
         return;
     if (password.size() < 4) {
         QMessageBox::warning(this, QStringLiteral("Inscription"),
-                             QStringLiteral("Le mot de passe doit contenir au moins 4 caracteres."));
+                             QStringLiteral("Le mot de passe doit contenir au moins 4 caractères."));
         return;
     }
     const QString confirmPassword = QInputDialog::getText(
@@ -4734,7 +4728,7 @@ void MainWindow::on_btnSignUp_clicked()
     const QString email = QInputDialog::getText(
         this,
         QStringLiteral("Inscription"),
-        QStringLiteral("Adresse e-mail (obligatoire pour \"Mot de passe oublie\") :"),
+        QStringLiteral("Adresse e-mail (obligatoire pour « Mot de passe oublié ») :"),
         QLineEdit::Normal,
         QString(),
         &ok).trimmed();
@@ -4758,13 +4752,13 @@ void MainWindow::on_btnSignUp_clicked()
     emailExists.bindValue(QStringLiteral(":e"), email);
     if (!emailExists.exec() || !emailExists.next()) {
         QMessageBox::critical(this, QStringLiteral("Inscription"),
-                              QStringLiteral("Verification e-mail impossible:\n%1")
+                              QStringLiteral("Vérification e-mail impossible :\n%1")
                                   .arg(emailExists.lastError().text().trimmed()));
         return;
     }
     if (emailExists.value(0).toInt() > 0) {
         QMessageBox::warning(this, QStringLiteral("Inscription"),
-                             QStringLiteral("Cette adresse e-mail est deja associee a un compte."));
+                             QStringLiteral("Cette adresse e-mail est déjà associée à un compte."));
         return;
     }
 
@@ -4773,13 +4767,13 @@ void MainWindow::on_btnSignUp_clicked()
     exists.bindValue(QStringLiteral(":u"), username);
     if (!exists.exec() || !exists.next()) {
         QMessageBox::critical(this, QStringLiteral("Inscription"),
-                              QStringLiteral("Verification utilisateur impossible:\n%1")
+                              QStringLiteral("Vérification utilisateur impossible :\n%1")
                                   .arg(exists.lastError().text().trimmed()));
         return;
     }
     if (exists.value(0).toInt() > 0) {
         QMessageBox::warning(this, QStringLiteral("Inscription"),
-                             QStringLiteral("Ce nom d'utilisateur existe deja."));
+                             QStringLiteral("Ce nom d'utilisateur existe déjà."));
         return;
     }
 
@@ -4804,21 +4798,21 @@ void MainWindow::on_btnSignUp_clicked()
     }
 
     QMessageBox::information(this, QStringLiteral("Inscription"),
-                             QStringLiteral("Compte cree avec succes. Vous pouvez maintenant vous connecter."));
+                             QStringLiteral("Compte créé avec succès. Vous pouvez maintenant vous connecter."));
 }
 
 void MainWindow::onForgotPasswordRequested()
 {
     if (!ensureDbOpenForProduits()) {
-        QMessageBox::warning(this, QStringLiteral("Mot de passe oublie"),
-                             QStringLiteral("Connexion Oracle indisponible. Verifiez le DSN ODBC projet_cuir."));
+        QMessageBox::warning(this, QStringLiteral("Mot de passe oublié"),
+                             QStringLiteral("Connexion Oracle indisponible. Vérifiez le DSN ODBC projet_cuir."));
         return;
     }
 
     QString empErr;
     if (!Employe::ensureSchema(&empErr)) {
-        QMessageBox::critical(this, QStringLiteral("Mot de passe oublie"),
-                              QStringLiteral("Impossible de preparer la table EMPLOYES:\n%1").arg(empErr));
+        QMessageBox::critical(this, QStringLiteral("Mot de passe oublié"),
+                              QStringLiteral("Impossible de préparer la table EMPLOYES :\n%1").arg(empErr));
         return;
     }
 
@@ -4832,8 +4826,8 @@ void MainWindow::onForgotPasswordRequested()
         ui->lineEdit_6->clear();
         ui->lineEdit_6->setFocus();
     }
-    QMessageBox::information(this, QStringLiteral("Mot de passe oublie"),
-                             QStringLiteral("Mot de passe employe reinitialise avec succes."));
+    QMessageBox::information(this, QStringLiteral("Mot de passe oublié"),
+                             QStringLiteral("Mot de passe employé réinitialisé avec succès."));
 }
 
 void MainWindow::on_btnMpremieres_2_clicked()
@@ -4942,7 +4936,7 @@ void MainWindow::installClientPageResponsiveLayout()
     filterTop->addItem(QStringLiteral("Filtre: Tous"), -1);
     filterTop->addItem(QStringLiteral("ID"), 0);
     filterTop->addItem(QStringLiteral("Nom"), 1);
-    filterTop->addItem(QStringLiteral("Prenom"), 2);
+    filterTop->addItem(QStringLiteral("Prénom"), 2);
     filterTop->addItem(QStringLiteral("Email"), 3);
     filterTop->addItem(QStringLiteral("Telephone"), 4);
     filterTop->addItem(QStringLiteral("Categorie"), 7);
@@ -5079,7 +5073,7 @@ void MainWindow::setupClientFicheScrollAndHeader()
 
     ui->lineEdit_IDC->setPlaceholderText(QStringLiteral("Entrez votre CIN"));
     ui->lineEdit_nomC->setPlaceholderText(QStringLiteral("Entrez votre nom"));
-    ui->lineEdit_PrenomC->setPlaceholderText(QStringLiteral("Entrez votre prenom"));
+    ui->lineEdit_PrenomC->setPlaceholderText(QStringLiteral("Entrez votre prénom"));
     ui->lineEdit_adresseC->setPlaceholderText(QStringLiteral("Entrez votre adresse"));
     ui->lineEdit_telephoneC->setPlaceholderText(QStringLiteral("Numero de telephone"));
     ui->lineEdit_emailC->setPlaceholderText(QStringLiteral("Entrez votre email"));
@@ -5111,7 +5105,7 @@ void MainWindow::setupClientFicheScrollAndHeader()
 
     formLay->addRow(new QLabel(QStringLiteral("CIN"), formWrap), ui->lineEdit_IDC);
     formLay->addRow(new QLabel(QStringLiteral("Nom"), formWrap), ui->lineEdit_nomC);
-    formLay->addRow(new QLabel(QStringLiteral("Prenom"), formWrap), ui->lineEdit_PrenomC);
+    formLay->addRow(new QLabel(QStringLiteral("Prénom"), formWrap), ui->lineEdit_PrenomC);
     formLay->addRow(new QLabel(QStringLiteral("Adresse"), formWrap), ui->lineEdit_adresseC);
     formLay->addRow(new QLabel(QStringLiteral("Telephone"), formWrap), ui->lineEdit_telephoneC);
     formLay->addRow(new QLabel(QStringLiteral("E-mail"), formWrap), ui->lineEdit_emailC);
@@ -5747,7 +5741,7 @@ bool MainWindow::isNumverifyPhoneValid(const QString &phone, bool *isValid, QStr
 
     if (errorMessage)
         *errorMessage = QStringLiteral(
-            "Authentification Numverify echouee (HTTP 401). Verifiez NUMVERIFY_API_KEY/NUMVERIFY_KEY.");
+            "Authentification Numverify échouée (HTTP 401). Vérifiez NUMVERIFY_API_KEY/NUMVERIFY_KEY.");
     return false;
 }
 
@@ -5932,26 +5926,26 @@ void MainWindow::onAnalyzeClientsClicked()
     if (cancelledByUser) {
         html += QStringLiteral(
             "<p style='margin:0 0 10px 0; color:#9a3412;'><b>Analyse interrompue par l'utilisateur.</b><br/>"
-            "Les resultats affiches sont partiels.</p>");
+            "Les résultats affichés sont partiels.</p>");
     } else {
-        html += QStringLiteral("<p style='margin:0 0 10px 0; color:#14532d;'><b>Analyse terminee avec succes.</b></p>");
+        html += QStringLiteral("<p style='margin:0 0 10px 0; color:#14532d;'><b>Analyse terminée avec succès.</b></p>");
     }
 
-    html += QStringLiteral("<p style='margin:8px 0 4px 0;'><b>Synthese executive</b></p><ul style='margin:0 0 8px 18px;'>");
-    html += itemLine(QStringLiteral("Clients analyses :"), QString::number(rows.size()));
-    html += itemLine(QStringLiteral("Clients bloques :"), QString::number(blockedCount));
+    html += QStringLiteral("<p style='margin:8px 0 4px 0;'><b>Synthèse exécutive</b></p><ul style='margin:0 0 8px 18px;'>");
+    html += itemLine(QStringLiteral("Clients analysés :"), QString::number(rows.size()));
+    html += itemLine(QStringLiteral("Clients bloqués :"), QString::number(blockedCount));
     html += QStringLiteral("</ul>");
 
-    html += QStringLiteral("<p style='margin:8px 0 4px 0;'><b>Qualite des donnees commerciales</b></p><ul style='margin:0 0 8px 18px;'>");
-    html += itemLine(QStringLiteral("Paiements trouves :"), QString::number(withPaymentCount));
+    html += QStringLiteral("<p style='margin:8px 0 4px 0;'><b>Qualité des données commerciales</b></p><ul style='margin:0 0 8px 18px;'>");
+    html += itemLine(QStringLiteral("Paiements trouvés :"), QString::number(withPaymentCount));
     html += itemLine(QStringLiteral("Sans historique de paiement :"), QString::number(noPaymentCount));
-    html += itemLine(QStringLiteral("Exposition credit estimee (total) :"), QString::number(totalCreditUsed, 'f', 2));
+    html += itemLine(QStringLiteral("Exposition crédit estimée (total) :"), QString::number(totalCreditUsed, 'f', 2));
     html += QStringLiteral("</ul>");
 
-    html += QStringLiteral("<p style='margin:8px 0 4px 0;'><b>Verification telephonique (Numverify)</b></p><ul style='margin:0 0 8px 18px;'>");
-    html += itemLine(QStringLiteral("Numeros valides :"), QString::number(phoneValidCount));
-    html += itemLine(QStringLiteral("Appels API effectues :"), QString::number(phoneApiCalls));
-    html += itemLine(QStringLiteral("Reutilisation du cache :"), QString::number(phoneCacheHits));
+    html += QStringLiteral("<p style='margin:8px 0 4px 0;'><b>Vérification téléphonique (Numverify)</b></p><ul style='margin:0 0 8px 18px;'>");
+    html += itemLine(QStringLiteral("Numéros valides :"), QString::number(phoneValidCount));
+    html += itemLine(QStringLiteral("Appels API effectués :"), QString::number(phoneApiCalls));
+    html += itemLine(QStringLiteral("Réutilisation du cache :"), QString::number(phoneCacheHits));
     if (phoneFormatIssues > 0)
         html += itemLine(QStringLiteral("Numeros ignores (format invalide) :"), QString::number(phoneFormatIssues));
     html += QStringLiteral("</ul>");
@@ -6177,7 +6171,7 @@ bool MainWindow::validateClientFormInputs(bool isUpdate)
         if (!firstInvalid) firstInvalid = ui->lineEdit_nomC;
     }
     if (prenom.isEmpty()) {
-        errors << QStringLiteral("- Prenom requis.");
+        errors << QStringLiteral("- Prénom requis.");
         if (!firstInvalid) firstInvalid = ui->lineEdit_PrenomC;
     }
     if (email.isEmpty()) {
@@ -6226,7 +6220,7 @@ bool MainWindow::validateClientFormInputs(bool isUpdate)
         errors << QStringLiteral("- Selectionnez une ligne a modifier.");
     }
     if (!errors.isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("Controle de saisie"),
+        QMessageBox::warning(this, QStringLiteral("Contrôle de saisie"),
                              QStringLiteral("Veuillez corriger les champs suivants :\n%1").arg(errors.join(QLatin1Char('\n'))));
         if (firstInvalid)
             firstInvalid->setFocus();
@@ -6241,7 +6235,7 @@ void MainWindow::on_pushButton_ajouter_clicked()
         if (!validateClientFormInputs(true))
             return;
         if (m_clientCurrentRowId <= 0) {
-            QMessageBox::warning(this, QStringLiteral("Clients"), QStringLiteral("Selectionnez une ligne."));
+            QMessageBox::warning(this, QStringLiteral("Clients"), QStringLiteral("Sélectionnez une ligne."));
             return;
         }
 
@@ -6331,7 +6325,7 @@ void MainWindow::on_pushButton_supprimer_clicked()
 {
     const int row = ui->clientTable->currentRow();
     if (row < 0) {
-        QMessageBox::warning(this, QStringLiteral("Clients"), QStringLiteral("Selectionnez une ligne."));
+        QMessageBox::warning(this, QStringLiteral("Clients"), QStringLiteral("Sélectionnez une ligne."));
         return;
     }
     const int id = ui->clientTable->item(row, 0)->text().toInt();
@@ -6367,7 +6361,7 @@ void MainWindow::on_pushButton_modifier_clicked()
 {
     const int row = ui->clientTable ? ui->clientTable->currentRow() : -1;
     if (row < 0 || !ui->clientTable->item(row, 0)) {
-        QMessageBox::warning(this, QStringLiteral("Clients"), QStringLiteral("Selectionnez une ligne."));
+        QMessageBox::warning(this, QStringLiteral("Clients"), QStringLiteral("Sélectionnez une ligne."));
         return;
     }
     fillClientFormFromSelectedRow();
@@ -8540,7 +8534,7 @@ void MainWindow::on_btnAjouter_6_clicked()
     if (!ensureDbOpenForProduits()) {
         const QString detail = db.lastError().text().trimmed();
         QMessageBox::warning(this, QStringLiteral("Produits"),
-                              QStringLiteral("Base fermee.")
+                              QStringLiteral("Base fermée.")
                                   + (detail.isEmpty() ? QString() : QStringLiteral("\n") + detail));
         return;
     }
@@ -8567,14 +8561,14 @@ void MainWindow::on_btnAjouter_6_clicked()
             nid = typed;
     }
     if (Produit::idExisteDeja(nid))
-        errors << QStringLiteral("- ID %1 deja utilise.").arg(nid);
+        errors << QStringLiteral("- ID %1 déjà utilisé.").arg(nid);
     const QString nom = ui->lineEditCIN_4 ? ui->lineEditCIN_4->text().trimmed() : QString();
     if (nom.isEmpty()) {
         errors << QStringLiteral("- Nom requis.");
         if (!firstInvalid) firstInvalid = ui->lineEditCIN_4;
     }
     if (!errors.isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("Controle de saisie"),
+        QMessageBox::warning(this, QStringLiteral("Contrôle de saisie"),
                              QStringLiteral("Veuillez corriger les champs suivants :\n%1").arg(errors.join(QLatin1Char('\n'))));
         if (firstInvalid)
             firstInvalid->setFocus();
@@ -8644,12 +8638,12 @@ void MainWindow::on_btnModifier_4_clicked()
     if (!ensureDbOpenForProduits()) {
         const QString detail = db.lastError().text().trimmed();
         QMessageBox::warning(this, QStringLiteral("Produits"),
-                              QStringLiteral("Base fermee.")
+                              QStringLiteral("Base fermée.")
                                   + (detail.isEmpty() ? QString() : QStringLiteral("\n") + detail));
         return;
     }
     if (m_produitSelectedId <= 0) {
-        QMessageBox::warning(this, QStringLiteral("Produits"), QStringLiteral("Selectionnez une ligne."));
+        QMessageBox::warning(this, QStringLiteral("Produits"), QStringLiteral("Sélectionnez une ligne."));
         return;
     }
 
@@ -8662,7 +8656,7 @@ void MainWindow::on_btnModifier_4_clicked()
         if (!firstInvalid) firstInvalid = ui->lineEditIdProduit;
     }
     if (newId != m_produitSelectedId && Produit::idExisteDeja(newId))
-        errors << QStringLiteral("- ID %1 deja pris.").arg(newId);
+        errors << QStringLiteral("- ID %1 déjà pris.").arg(newId);
 
     bool qtyOk = false;
     const int qte = ui->lineEditAdresse_2 ? ui->lineEditAdresse_2->text().trimmed().toInt(&qtyOk) : 0;
@@ -8677,7 +8671,7 @@ void MainWindow::on_btnModifier_4_clicked()
         if (!firstInvalid) firstInvalid = ui->lineEditCIN_4;
     }
     if (!errors.isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("Controle de saisie"),
+        QMessageBox::warning(this, QStringLiteral("Contrôle de saisie"),
                              QStringLiteral("Veuillez corriger les champs suivants :\n%1").arg(errors.join(QLatin1Char('\n'))));
         if (firstInvalid)
             firstInvalid->setFocus();
@@ -8733,12 +8727,12 @@ void MainWindow::on_btnSupprimer_4_clicked()
     if (!ensureDbOpenForProduits()) {
         const QString detail = db.lastError().text().trimmed();
         QMessageBox::warning(this, QStringLiteral("Produits"),
-                              QStringLiteral("Base fermee.")
+                              QStringLiteral("Base fermée.")
                                   + (detail.isEmpty() ? QString() : QStringLiteral("\n") + detail));
         return;
     }
     if (m_produitSelectedId <= 0) {
-        QMessageBox::warning(this, QStringLiteral("Produits"), QStringLiteral("Selectionnez une ligne."));
+        QMessageBox::warning(this, QStringLiteral("Produits"), QStringLiteral("Sélectionnez une ligne."));
         return;
     }
 
@@ -8757,10 +8751,10 @@ void MainWindow::on_btnSupprimer_4_clicked()
     }
     refreshProduitsTable();
     clearProduitForm();
-    QMessageBox::information(this, QStringLiteral("Produits"), QStringLiteral("Supprime."));
+    QMessageBox::information(this, QStringLiteral("Produits"), QStringLiteral("Supprimé."));
 }
 
-// ------------------- Page Matieres premieres -------------------
+// ------------------- Page Matières premières -------------------
 
 void MainWindow::installMatieresPageResponsiveLayout()
 {
@@ -8848,7 +8842,7 @@ void MainWindow::installEmployesPageClientLikeLayout()
             filterTop->addItem(QStringLiteral("CIN"), 0);
             filterTop->addItem(QStringLiteral("ID Carte"), 1);
             filterTop->addItem(QStringLiteral("Nom"), 2);
-            filterTop->addItem(QStringLiteral("Prenom"), 3);
+            filterTop->addItem(QStringLiteral("Prénom"), 3);
             filterTop->addItem(QStringLiteral("Poste"), 8);
             filterTop->addItem(QStringLiteral("Email"), 10);
 
@@ -9392,14 +9386,14 @@ void MainWindow::openEmployesModule()
     ui->contentStack->setCurrentIndex(1);
     setActiveButton(ui->btnEmployes);
     if (!ensureDbOpenForProduits()) {
-        QMessageBox::warning(this, QStringLiteral("Employes"),
-                             QStringLiteral("Connexion Oracle impossible. Verifiez le DSN ODBC (projet_cuir)."));
+        QMessageBox::warning(this, QStringLiteral("Employés"),
+                             QStringLiteral("Connexion Oracle impossible. Vérifiez le DSN ODBC (projet_cuir)."));
         return;
     }
     QString err;
     if (!Employe::ensureSchema(&err)) {
-        QMessageBox::critical(this, QStringLiteral("Employes"),
-                              QStringLiteral("Preparation du schema EMPLOYES :\n%1").arg(err));
+        QMessageBox::critical(this, QStringLiteral("Employés"),
+                              QStringLiteral("Préparation du schéma EMPLOYES :\n%1").arg(err));
         return;
     }
     Employe::seedDemoIfEmpty(&err);
@@ -9445,7 +9439,7 @@ void MainWindow::refreshEmployesTable()
         return;
     QString err;
     if (!Employe::populateTable(ui->employeeTable, &err)) {
-        QMessageBox::warning(this, QStringLiteral("Employes"),
+        QMessageBox::warning(this, QStringLiteral("Employés"),
                              QStringLiteral("Chargement :\n%1").arg(err));
         return;
     }
@@ -9457,7 +9451,7 @@ void MainWindow::refreshEmployesTable()
     ui->employeeTable->setHorizontalHeaderItem(0, new QTableWidgetItem(QStringLiteral("CIN")));
     ui->employeeTable->setHorizontalHeaderItem(1, new QTableWidgetItem(QStringLiteral("ID Carte")));
     ui->employeeTable->setHorizontalHeaderItem(2, new QTableWidgetItem(QStringLiteral("Nom")));
-    ui->employeeTable->setHorizontalHeaderItem(3, new QTableWidgetItem(QStringLiteral("Prenom")));
+    ui->employeeTable->setHorizontalHeaderItem(3, new QTableWidgetItem(QStringLiteral("Prénom")));
     ui->employeeTable->setHorizontalHeaderItem(4, new QTableWidgetItem(QStringLiteral("Sexe")));
     ui->employeeTable->setHorizontalHeaderItem(5, new QTableWidgetItem(QStringLiteral("Salaire")));
     ui->employeeTable->setHorizontalHeaderItem(6, new QTableWidgetItem(QStringLiteral("Date Embauche")));
@@ -9604,7 +9598,7 @@ void MainWindow::setupEmployePage()
         }
         m_employeIdCarteEdit->setPlaceholderText(QStringLiteral("Entrez l'ID carte"));
         if (ui->lineEditNom) ui->lineEditNom->setPlaceholderText(QStringLiteral("Entrez votre nom"));
-        if (ui->lineEditPrenom) ui->lineEditPrenom->setPlaceholderText(QStringLiteral("Entrez votre prenom"));
+        if (ui->lineEditPrenom) ui->lineEditPrenom->setPlaceholderText(QStringLiteral("Entrez votre prénom"));
         if (ui->lineEditAdresse) ui->lineEditAdresse->setPlaceholderText(QStringLiteral("Entrez votre adresse"));
         if (ui->lineEditTelephone) ui->lineEditTelephone->setPlaceholderText(QStringLiteral("Numero de telephone"));
         if (ui->lineEditEmail) ui->lineEditEmail->setPlaceholderText(QStringLiteral("Entrez votre email"));
@@ -9634,7 +9628,7 @@ void MainWindow::setupEmployePage()
         formLay->addRow(new QLabel(QStringLiteral("CIN"), formWrap), ui->lineEditCIN);
         formLay->addRow(new QLabel(QStringLiteral("ID carte"), formWrap), m_employeIdCarteEdit);
         formLay->addRow(new QLabel(QStringLiteral("Nom"), formWrap), ui->lineEditNom);
-        formLay->addRow(new QLabel(QStringLiteral("Prenom"), formWrap), ui->lineEditPrenom);
+        formLay->addRow(new QLabel(QStringLiteral("Prénom"), formWrap), ui->lineEditPrenom);
         formLay->addRow(new QLabel(QStringLiteral("Adresse"), formWrap), ui->lineEditAdresse);
         formLay->addRow(new QLabel(QStringLiteral("Telephone"), formWrap), ui->lineEditTelephone);
         formLay->addRow(new QLabel(QStringLiteral("E-mail"), formWrap), ui->lineEditEmail);
@@ -9779,25 +9773,25 @@ void MainWindow::onEmployeAjouterClicked()
         return;
     }
     if (!ensureDbOpenForProduits()) {
-        QMessageBox::warning(this, QStringLiteral("Employes"), QStringLiteral("Base de donnees fermee."));
+        QMessageBox::warning(this, QStringLiteral("Employés"), QStringLiteral("Base de données fermée."));
         return;
     }
     QString schemaErr;
     if (!Employe::ensureSchema(&schemaErr)) {
-        QMessageBox::critical(this, QStringLiteral("Employes"),
-                              QStringLiteral("Schema EMPLOYES :\n%1").arg(schemaErr));
+        QMessageBox::critical(this, QStringLiteral("Employés"),
+                              QStringLiteral("Schéma EMPLOYES :\n%1").arg(schemaErr));
         return;
     }
     const EmployeEditorWidgets w = employeEditorBindings();
     const QString validation = Employe::validateForm(w);
     if (!validation.isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("Controle de saisie"), validation);
+        QMessageBox::warning(this, QStringLiteral("Contrôle de saisie"), validation);
         return;
     }
     const QString cin = w.cin->text().trimmed();
     QString err;
     if (Employe::cinExists(cin, &err)) {
-        QMessageBox::warning(this, QStringLiteral("CIN"), QStringLiteral("Un employe avec ce CIN existe deja."));
+        QMessageBox::warning(this, QStringLiteral("CIN"), QStringLiteral("Un employé avec ce CIN existe déjà."));
         return;
     }
 
@@ -9818,15 +9812,15 @@ void MainWindow::onEmployeAjouterClicked()
               w.adresse->text().trimmed(),
               w.email->text().trimmed());
 
-    const QString confirmMsg = QStringLiteral("Confirmer l'ajout de l'employe CIN %1 ?").arg(cin);
-    if (QMessageBox::question(this, QStringLiteral("Employes"), confirmMsg,
+    const QString confirmMsg = QStringLiteral("Confirmer l'ajout de l'employé CIN %1 ?").arg(cin);
+    if (QMessageBox::question(this, QStringLiteral("Employés"), confirmMsg,
                               QMessageBox::Yes | QMessageBox::No, QMessageBox::No)
         != QMessageBox::Yes) {
         return;
     }
 
     if (!e.ajouter(&err)) {
-        QMessageBox::warning(this, QStringLiteral("Employes"), QStringLiteral("Erreur a l'ajout :\n%1").arg(err));
+        QMessageBox::warning(this, QStringLiteral("Employés"), QStringLiteral("Erreur à l'ajout :\n%1").arg(err));
         return;
     }
     ui->employeeTable->clearSelection();
@@ -9837,20 +9831,20 @@ void MainWindow::onEmployeAjouterClicked()
 void MainWindow::onEmployeModifierClicked()
 {
     if (!ui->lineEditCIN || ui->lineEditCIN->text().trimmed().isEmpty()) {
-        QMessageBox::information(this, QStringLiteral("Employes"),
-                                 QStringLiteral("Selectionnez un employe dans le tableau."));
+        QMessageBox::information(this, QStringLiteral("Employés"),
+                                 QStringLiteral("Sélectionnez un employé dans le tableau."));
         return;
     }
     QString schemaErr;
     if (!Employe::ensureSchema(&schemaErr)) {
-        QMessageBox::critical(this, QStringLiteral("Employes"),
-                              QStringLiteral("Schema EMPLOYES :\n%1").arg(schemaErr));
+        QMessageBox::critical(this, QStringLiteral("Employés"),
+                              QStringLiteral("Schéma EMPLOYES :\n%1").arg(schemaErr));
         return;
     }
     const EmployeEditorWidgets w = employeEditorBindings();
     const QString validation = Employe::validateForm(w);
     if (!validation.isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("Controle de saisie"), validation);
+        QMessageBox::warning(this, QStringLiteral("Contrôle de saisie"), validation);
         return;
     }
 
@@ -9871,8 +9865,8 @@ void MainWindow::onEmployeModifierClicked()
               w.adresse->text().trimmed(),
               w.email->text().trimmed());
 
-    const QString confirmMsg = QStringLiteral("Confirmer la modification de l'employe CIN %1 ?").arg(w.cin->text().trimmed());
-    if (QMessageBox::question(this, QStringLiteral("Employes"), confirmMsg,
+    const QString confirmMsg = QStringLiteral("Confirmer la modification de l'employé CIN %1 ?").arg(w.cin->text().trimmed());
+    if (QMessageBox::question(this, QStringLiteral("Employés"), confirmMsg,
                               QMessageBox::Yes | QMessageBox::No, QMessageBox::No)
         != QMessageBox::Yes) {
         return;
@@ -9880,7 +9874,7 @@ void MainWindow::onEmployeModifierClicked()
 
     QString err;
     if (!e.modifier(&err)) {
-        QMessageBox::warning(this, QStringLiteral("Employes"), QStringLiteral("Erreur :\n%1").arg(err));
+        QMessageBox::warning(this, QStringLiteral("Employés"), QStringLiteral("Erreur :\n%1").arg(err));
         return;
     }
     refreshEmployesTable();
@@ -9897,20 +9891,20 @@ void MainWindow::onEmployeModifierClicked()
             if (QWidget *w = ui->employeeTable->cellWidget(r, 12)) w->setEnabled(true);
         }
     }
-    QMessageBox::information(this, QStringLiteral("Employes"), QStringLiteral("Modification enregistree."));
+    QMessageBox::information(this, QStringLiteral("Employés"), QStringLiteral("Modification enregistree."));
 }
 
 void MainWindow::onEmployeSupprimerClicked()
 {
     if (!ui->lineEditCIN || ui->lineEditCIN->text().trimmed().isEmpty()) {
-        QMessageBox::information(this, QStringLiteral("Employes"),
-                                 QStringLiteral("Selectionnez un employe avant suppression."));
+        QMessageBox::information(this, QStringLiteral("Employés"),
+                                 QStringLiteral("Sélectionnez un employé avant suppression."));
         return;
     }
     const QString cin = ui->lineEditCIN->text().trimmed();
     const QString nom = ui->lineEditNom ? ui->lineEditNom->text().trimmed() : QString();
     const QString prenom = ui->lineEditPrenom ? ui->lineEditPrenom->text().trimmed() : QString();
-    const QString question = QStringLiteral("Supprimer l'employe :\n\nCIN : %1\nNom : %2\nPrenom : %3 ?")
+    const QString question = QStringLiteral("Supprimer l'employé :\n\nCIN : %1\nNom : %2\nPrénom : %3 ?")
                                  .arg(cin, nom, prenom);
     if (QMessageBox::question(this, QStringLiteral("Confirmation"), question, QMessageBox::Yes | QMessageBox::No,
                               QMessageBox::No)
@@ -9919,14 +9913,14 @@ void MainWindow::onEmployeSupprimerClicked()
     }
     QString err;
     if (!Employe::supprimer(cin, &err)) {
-        QMessageBox::warning(this, QStringLiteral("Employes"), QStringLiteral("Erreur :\n%1").arg(err));
+        QMessageBox::warning(this, QStringLiteral("Employés"), QStringLiteral("Erreur :\n%1").arg(err));
         return;
     }
     if (ui->employeeTable)
         ui->employeeTable->clearSelection();
     clearEmployeForm();
     refreshEmployesTable();
-    QMessageBox::information(this, QStringLiteral("Employes"), QStringLiteral("Suppression reussie."));
+    QMessageBox::information(this, QStringLiteral("Employés"), QStringLiteral("Suppression réussie."));
 }
 
 void MainWindow::onEmployeRechercherClicked()
@@ -10333,9 +10327,28 @@ void MainWindow::refreshMatieresTable()
 {
     if (!ui->employeeTable_5)
         return;
+    if (!ensureDbOpenForProduits()) {
+        QMessageBox::warning(this, QStringLiteral("Matières premières"),
+                             QStringLiteral("Connexion Oracle indisponible. Veuillez reessayer."));
+        return;
+    }
     QString err;
     if (!MatierePremiere::populateTable(ui->employeeTable_5, &err)) {
-        QMessageBox::warning(this, QStringLiteral("Matieres premieres"),
+        const QString errUpper = err.toUpper();
+        if (errUpper.contains(QStringLiteral("ORA-03114"))
+            || errUpper.contains(QStringLiteral("ORA-03113"))
+            || errUpper.contains(QStringLiteral("NOT CONNECTED TO ORACLE"))) {
+            if (ensureDbOpenForProduits()) {
+                err.clear();
+                if (MatierePremiere::populateTable(ui->employeeTable_5, &err)) {
+                    applyMatieresViewFilters();
+                    applyMatieresTableSortIfNeeded();
+                    updateMatieresStatsPanel();
+                    return;
+                }
+            }
+        }
+        QMessageBox::warning(this, QStringLiteral("Matières premières"),
                              QStringLiteral("Chargement impossible.\n%1").arg(err));
         return;
     }
@@ -10451,12 +10464,12 @@ void MainWindow::on_btnAjouter_7_clicked()
         return;
     }
     if (!ensureDbOpenForProduits()) {
-        QMessageBox::warning(this, QStringLiteral("Matieres premieres"), QStringLiteral("Base fermee."));
+        QMessageBox::warning(this, QStringLiteral("Matières premières"), QStringLiteral("Base fermée."));
         return;
     }
     QString schemaErr;
     if (!MatierePremiere::ensureSchema(&schemaErr)) {
-        QMessageBox::critical(this, QStringLiteral("Matieres premieres"), schemaErr);
+        QMessageBox::critical(this, QStringLiteral("Matières premières"), schemaErr);
         return;
     }
 
@@ -10464,9 +10477,9 @@ void MainWindow::on_btnAjouter_7_clicked()
     QWidget *firstInvalid = nullptr;
     MatierePremiere m;
     if (!readMatiereFromForm(m)) {
-        errors << QStringLiteral("- Verifiez : reference, nom du cuir, type, gamme, couleur, statut, email.");
-        errors << QStringLiteral("- Email : format valide (ex. nom@domaine.com).");
-        errors << QStringLiteral("- Quantite : entier >= 0.");
+        errors << QStringLiteral("- Vérifiez : référence, nom du cuir, type, gamme, couleur, statut, e-mail.");
+        errors << QStringLiteral("- E-mail : format valide (ex. nom@domaine.com).");
+        errors << QStringLiteral("- Quantité : entier ≥ 0.");
         if (!firstInvalid) firstInvalid = ui->lineEditNom_5;
     }
 
@@ -10479,18 +10492,18 @@ void MainWindow::on_btnAjouter_7_clicked()
             if (!firstInvalid) firstInvalid = ui->lineEditCIN_5;
         }
         if (MatierePremiere::idExiste(nid))
-            errors << QStringLiteral("- ID %1 deja utilise.").arg(nid);
+            errors << QStringLiteral("- ID %1 déjà utilisé.").arg(nid);
     } else {
         nid = MatierePremiere::nextAvailableId();
     }
     if (nid <= 0 && errors.isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("Matieres premieres"),
+        QMessageBox::warning(this, QStringLiteral("Matières premières"),
                              MatierePremiere::lastSqlError.isEmpty() ? QStringLiteral("ID indisponible.")
                                                                      : MatierePremiere::lastSqlError);
         return;
     }
     if (!errors.isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("Controle de saisie"),
+        QMessageBox::warning(this, QStringLiteral("Contrôle de saisie"),
                              QStringLiteral("Veuillez corriger les champs suivants :\n%1").arg(errors.join(QLatin1Char('\n'))));
         if (firstInvalid)
             firstInvalid->setFocus();
@@ -10507,15 +10520,28 @@ void MainWindow::on_btnAjouter_7_clicked()
                              m.getEmail(),
                              m.getReserve());
     const QString confirmMsg = QStringLiteral("Confirmer l'ajout de la matiere premiere ID %1 ?").arg(nid);
-    if (QMessageBox::question(this, QStringLiteral("Matieres premieres"), confirmMsg,
+    if (QMessageBox::question(this, QStringLiteral("Matières premières"), confirmMsg,
                               QMessageBox::Yes | QMessageBox::No, QMessageBox::No)
         != QMessageBox::Yes) {
         return;
     }
     if (!toInsert.ajouter()) {
-        QMessageBox::critical(this, QStringLiteral("Matieres premieres"),
-                              QStringLiteral("Echec ajout:\n%1").arg(MatierePremiere::lastSqlError));
-        return;
+        const QString errUpper = MatierePremiere::lastSqlError.toUpper();
+        if (errUpper.contains(QStringLiteral("ORA-03114"))
+            || errUpper.contains(QStringLiteral("ORA-03113"))
+            || errUpper.contains(QStringLiteral("NOT CONNECTED TO ORACLE"))) {
+            if (ensureDbOpenForProduits() && toInsert.ajouter()) {
+                // Reconnecte puis reprise normale.
+            } else {
+                QMessageBox::critical(this, QStringLiteral("Matières premières"),
+                                      QStringLiteral("Echec ajout:\n%1").arg(MatierePremiere::lastSqlError));
+                return;
+            }
+        } else {
+            QMessageBox::critical(this, QStringLiteral("Matières premières"),
+                                  QStringLiteral("Echec ajout:\n%1").arg(MatierePremiere::lastSqlError));
+            return;
+        }
     }
     if (m_firebaseManager && m_firebaseManager->isConfigured())
         m_firebaseManager->postMatierePremiere(toInsert);
@@ -10526,17 +10552,17 @@ void MainWindow::on_btnAjouter_7_clicked()
                                 ? QStringLiteral("Ajoute (ID %1).").arg(nid)
                                 : QStringLiteral("Ajoute (ID %1).\n%2")
                                       .arg(QString::number(nid), smtpStatus);
-    QMessageBox::information(this, QStringLiteral("Matieres premieres"), doneMsg);
+    QMessageBox::information(this, QStringLiteral("Matières premières"), doneMsg);
 }
 
 void MainWindow::on_btnModifier_5_clicked()
 {
     if (!ensureDbOpenForProduits()) {
-        QMessageBox::warning(this, QStringLiteral("Matieres premieres"), QStringLiteral("Base fermee."));
+        QMessageBox::warning(this, QStringLiteral("Matières premières"), QStringLiteral("Base fermée."));
         return;
     }
     if (m_matiereSelectedId <= 0) {
-        QMessageBox::warning(this, QStringLiteral("Matieres premieres"), QStringLiteral("Selectionnez une ligne."));
+        QMessageBox::warning(this, QStringLiteral("Matières premières"), QStringLiteral("Sélectionnez une ligne."));
         return;
     }
     QStringList errors;
@@ -10553,9 +10579,9 @@ void MainWindow::on_btnModifier_5_clicked()
         if (!firstInvalid) firstInvalid = ui->lineEditCIN_5;
     }
     if (newId != m_matiereSelectedId && MatierePremiere::idExiste(newId))
-        errors << QStringLiteral("- ID %1 deja pris.").arg(newId);
+        errors << QStringLiteral("- ID %1 déjà pris.").arg(newId);
     if (!errors.isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("Controle de saisie"),
+        QMessageBox::warning(this, QStringLiteral("Contrôle de saisie"),
                              QStringLiteral("Veuillez corriger les champs suivants :\n%1").arg(errors.join(QLatin1Char('\n'))));
         if (firstInvalid)
             firstInvalid->setFocus();
@@ -10572,15 +10598,26 @@ void MainWindow::on_btnModifier_5_clicked()
                         m.getEmail(),
                         m.getReserve());
     const QString confirmMsg = QStringLiteral("Confirmer la modification de la matiere premiere ID %1 ?").arg(m_matiereSelectedId);
-    if (QMessageBox::question(this, QStringLiteral("Matieres premieres"), confirmMsg,
+    if (QMessageBox::question(this, QStringLiteral("Matières premières"), confirmMsg,
                               QMessageBox::Yes | QMessageBox::No, QMessageBox::No)
         != QMessageBox::Yes) {
         return;
     }
     if (!upd.modifier(m_matiereSelectedId, newId)) {
-        QMessageBox::critical(this, QStringLiteral("Matieres premieres"),
-                              QStringLiteral("Echec modification:\n%1").arg(MatierePremiere::lastSqlError));
-        return;
+        const QString errUpper = MatierePremiere::lastSqlError.toUpper();
+        if (errUpper.contains(QStringLiteral("ORA-03114"))
+            || errUpper.contains(QStringLiteral("ORA-03113"))
+            || errUpper.contains(QStringLiteral("NOT CONNECTED TO ORACLE"))) {
+            if (!(ensureDbOpenForProduits() && upd.modifier(m_matiereSelectedId, newId))) {
+                QMessageBox::critical(this, QStringLiteral("Matières premières"),
+                                      QStringLiteral("Echec modification:\n%1").arg(MatierePremiere::lastSqlError));
+                return;
+            }
+        } else {
+            QMessageBox::critical(this, QStringLiteral("Matières premières"),
+                                  QStringLiteral("Echec modification:\n%1").arg(MatierePremiere::lastSqlError));
+            return;
+        }
     }
     if (m_firebaseManager && m_firebaseManager->isConfigured())
         m_firebaseManager->postMatierePremiere(upd);
@@ -10603,21 +10640,21 @@ void MainWindow::on_btnModifier_5_clicked()
         ui->lineEditCIN_5->setText(QString::number(newId));
     refreshMatieresTable();
     const QString doneMsg = smtpStatus.isEmpty() ? QStringLiteral("Modifie.") : QStringLiteral("Modifie.\n%1").arg(smtpStatus);
-    QMessageBox::information(this, QStringLiteral("Matieres premieres"), doneMsg);
+    QMessageBox::information(this, QStringLiteral("Matières premières"), doneMsg);
 }
 
 void MainWindow::on_btnSupprimer_5_clicked()
 {
     if (!ensureDbOpenForProduits()) {
-        QMessageBox::warning(this, QStringLiteral("Matieres premieres"), QStringLiteral("Base fermee."));
+        QMessageBox::warning(this, QStringLiteral("Matières premières"), QStringLiteral("Base fermée."));
         return;
     }
     if (m_matiereSelectedId <= 0) {
-        QMessageBox::warning(this, QStringLiteral("Matieres premieres"), QStringLiteral("Selectionnez une ligne."));
+        QMessageBox::warning(this, QStringLiteral("Matières premières"), QStringLiteral("Sélectionnez une ligne."));
         return;
     }
     if (QMessageBox::question(this,
-                              QStringLiteral("Matieres premieres"),
+                              QStringLiteral("Matières premières"),
                               QStringLiteral("Supprimer la matiere premiere ID %1 ?").arg(m_matiereSelectedId),
                               QMessageBox::Yes | QMessageBox::No,
                               QMessageBox::No)
@@ -10625,13 +10662,24 @@ void MainWindow::on_btnSupprimer_5_clicked()
         return;
     }
     if (!MatierePremiere::supprimer(m_matiereSelectedId)) {
-        QMessageBox::critical(this, QStringLiteral("Matieres premieres"),
-                              QStringLiteral("Echec suppression:\n%1").arg(MatierePremiere::lastSqlError));
-        return;
+        const QString errUpper = MatierePremiere::lastSqlError.toUpper();
+        if (errUpper.contains(QStringLiteral("ORA-03114"))
+            || errUpper.contains(QStringLiteral("ORA-03113"))
+            || errUpper.contains(QStringLiteral("NOT CONNECTED TO ORACLE"))) {
+            if (!(ensureDbOpenForProduits() && MatierePremiere::supprimer(m_matiereSelectedId))) {
+                QMessageBox::critical(this, QStringLiteral("Matières premières"),
+                                      QStringLiteral("Echec suppression:\n%1").arg(MatierePremiere::lastSqlError));
+                return;
+            }
+        } else {
+            QMessageBox::critical(this, QStringLiteral("Matières premières"),
+                                  QStringLiteral("Echec suppression:\n%1").arg(MatierePremiere::lastSqlError));
+            return;
+        }
     }
     refreshMatieresTable();
     clearMatiereForm();
-    QMessageBox::information(this, QStringLiteral("Matieres premieres"), QStringLiteral("Supprime."));
+    QMessageBox::information(this, QStringLiteral("Matières premières"), QStringLiteral("Supprimé."));
 }
 
 void MainWindow::on_btnExportPDF_2_clicked()
